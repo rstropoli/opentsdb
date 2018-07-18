@@ -102,6 +102,8 @@ public final class TSQuery {
   /** The query status for tracking over all performance of this query */
   private QueryStats query_stats;
   
+  private boolean use_backscanner;
+  
   /**
    * Default constructor necessary for POJO de/serialization
    */
@@ -145,7 +147,8 @@ public final class TSQuery {
         && Objects.equal(with_global_annotations, query.with_global_annotations)
         && Objects.equal(show_tsuids, query.show_tsuids)
         && Objects.equal(queries, query.queries)
-        && Objects.equal(ms_resolution, query.ms_resolution);
+        && Objects.equal(ms_resolution, query.ms_resolution) 
+        && Objects.equal(use_backscanner, query.use_backscanner);
   }
   
   /**
@@ -280,6 +283,8 @@ public final class TSQuery {
       .append(show_tsuids)
       .append(", ms_resolution=")
       .append(ms_resolution)
+      .append(", user_backscanner=")
+      .append(use_backscanner)
       .append(", options=[");
     if (options != null && !options.isEmpty()) {
       int counter = 0;
@@ -360,6 +365,10 @@ public final class TSQuery {
   /** @return whether or not the requestor wants millisecond resolution */
   public boolean getMsResolution() {
     return ms_resolution;
+  }
+  
+  public boolean getUseBackScanner () {
+	  return use_backscanner;
   }
   
   /** @return whether or not to show the query with the results */
@@ -454,6 +463,10 @@ public final class TSQuery {
     this.ms_resolution = ms_resolution;
   }
 
+  public void setUseBackScanner ( boolean use_backscanner ) {
+	  this.use_backscanner = use_backscanner;
+  }
+  
   /** @param show_query whether or not to show the query with the serialization */
   public void setShowQuery(boolean show_query) { 
     this.show_query = show_query;

@@ -16,6 +16,8 @@ pom.xml
 */target/*
 *.orig
 *.log
+*.jar
+*.old
 
 #for Intellij
 \.idea
@@ -45,3 +47,9 @@ tools/docker/libs
 tools/docker/*.jar
 tools/docker/logback.xml
 tools/docker/opentsdb.conf
+
+#Misc
+opentsdb.spec
+opentsdb.conf
+src/net/
+fetchdep.sh

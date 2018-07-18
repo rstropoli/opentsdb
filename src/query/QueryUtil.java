@@ -346,6 +346,13 @@ public class QueryUtil {
     scanner.setFamily(family);
     return scanner;
   }
+
+  public static long getTimestampFromKey ( byte [] key ) {
+	final short metric_width = TSDB.metrics_width();
+	final int metric_salt_width = metric_width + Const.SALT_WIDTH();
+	Integer ts = Bytes.getInt( key, metric_salt_width);
+	return ts.longValue();
+	}
   
   /**
    * Appends the given UID to the given regular expression buffer

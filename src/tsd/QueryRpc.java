@@ -551,6 +551,10 @@ final class QueryRpc implements HttpRpc {
       data_query.setTimezone(query.getQueryStringParam("timezone"));
     }
       
+    if ( query.hasQueryStringParam("usebackscanner")) {
+    	data_query.setUseBackScanner(true);
+    }
+    
     if (query.hasQueryStringParam("use_calendar")) {
       final String val = query.getQueryStringParam("use_calendar").trim().toUpperCase();
       final boolean use_calendar;

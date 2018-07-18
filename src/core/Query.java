@@ -67,6 +67,18 @@ public interface Query {
    */
   long getEndTime();
   
+  /***
+   * 
+   * @param useBackscan
+   */
+  void setUseBackScanner ( boolean useBackscan);
+  
+  /***
+   * 
+   * @return
+   */
+  boolean getUseBackScanner ( );
+  
   /**
    * Sets whether or not the data queried will be deleted.
    * @param delete True if data should be deleted, false otherwise.

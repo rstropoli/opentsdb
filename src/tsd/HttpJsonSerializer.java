@@ -773,7 +773,7 @@ class HttpJsonSerializer extends HttpSerializer {
           if (!timeout_flag.get(0) && as_arrays) {
             json.writeStartArray();
             for (final DataPoint dp : dps) {
-              if (dp.timestamp() < data_query.startTime() || 
+              if ( ( dp.timestamp() < data_query.startTime() && ! data_query.getUseBackScanner() ) || 
                   dp.timestamp() > data_query.endTime()) {
                 continue;
               }
@@ -800,7 +800,7 @@ class HttpJsonSerializer extends HttpSerializer {
           } else if (!timeout_flag.get(0)) {
             json.writeStartObject();
             for (final DataPoint dp : dps) {
-              if (dp.timestamp() < (data_query.startTime()) || 
+              if ( ( dp.timestamp() < data_query.startTime()  && ! data_query.getUseBackScanner() ) || 
                   dp.timestamp() > (data_query.endTime())) {
                 continue;
               }

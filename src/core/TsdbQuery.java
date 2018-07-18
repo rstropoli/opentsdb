@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -98,6 +100,9 @@ final class TsdbQuery implements Query {
   /** Whether or not to enable the fuzzy row filter for Hbase */
   private boolean enable_fuzzy_filter;
   
+  /** Use reverse scan to retrieve extra data point before starttime, this is to ensure extra point is retrieved if outside of the interval */
+  private boolean useBackScanner = false;
+  private byte[] start_key;
   /**
    * Tags by which we must group the results.
    * Each element is a tag ID.
@@ -202,6 +207,15 @@ final class TsdbQuery implements Query {
       setEndTime(DateTime.currentTimeMillis());
     }
     return end_time;
+  }
+  
+  
+  public void setUseBackScanner ( boolean useBackScanner) {
+	  this.useBackScanner = useBackScanner;
+  }
+  
+  public boolean getUseBackScanner ( ) {
+	  return this.useBackScanner;
   }
   
   @Override
@@ -320,6 +334,8 @@ final class TsdbQuery implements Query {
     if (index < 0 || index > query.getQueries().size()) {
       throw new IllegalArgumentException("Query index was out of range");
     }
+    
+    useBackScanner = query.getUseBackScanner ();
     
     final TSSubQuery sub_query = query.getQueries().get(index);
     setStartTime(query.startTime());
@@ -532,6 +548,14 @@ final class TsdbQuery implements Query {
       new TreeMap<byte[], Span>(new SpanCmp(
           (short)(Const.SALT_WIDTH() + metric_width)));
     
+    final Map <byte[], Span> spansSoFar = new ConcurrentHashMap<byte[], Span> ();
+    
+    final Set<String> skips = Collections.newSetFromMap(
+	        new ConcurrentHashMap<String, Boolean>()); // new HashSet<String>();
+    final Set<String> keepers = Collections.newSetFromMap(
+	        new ConcurrentHashMap<String, Boolean>()); // new HashSet<String>();
+  
+    
     // Copy only the filters that should trigger a tag resolution. If this list
     // is empty due to literals or a wildcard star, then we'll save a TON of
     // UID lookups
@@ -547,6 +571,7 @@ final class TsdbQuery implements Query {
       scanner_filters = null;
     }
     
+    
     if (Const.SALT_WIDTH() > 0) {
       final List<Scanner> scanners = new ArrayList<Scanner>(Const.SALT_BUCKETS());
       for (int i = 0; i < Const.SALT_BUCKETS(); i++) {
@@ -558,7 +583,25 @@ final class TsdbQuery implements Query {
     }
     
     scan_start_time = DateTime.nanoTime();
+    
+    /** A counter used to determine how many scanners are still running */
+    final AtomicInteger completed_tasks = new AtomicInteger();
+    final int taskCount = (useBackScanner)?2:1;
+    
+    final AtomicInteger nrows = new AtomicInteger();
+    
+    Scanner backScanner = null;
+    
+    if ( useBackScanner ) {
+    	backScanner = getReverseScanner();
+    	backScanner.setMaxNumRows(1);
+    	
+//    	LOG.info("TJS BackScanner Created flag set to " + backScanner.isReversed() + " dump --> " + backScanner.toString() );
+    }
+    
     final Scanner scanner = getScanner();
+    start_key = Arrays.copyOf(scanner.getCurrentKey(), scanner.getCurrentKey().length );
+    
     if (query_stats != null) {
       query_stats.addScannerId(query_index, 0, scanner.toString());
     }
@@ -575,12 +618,14 @@ final class TsdbQuery implements Query {
     final class ScannerCB implements Callback<Object,
       ArrayList<ArrayList<KeyValue>>> {
       
-      int nrows = 0;
+      private Scanner scanner;
+      
+      // int nrows = spans.size();
       boolean seenAnnotation = false;
       long scanner_start = DateTime.nanoTime();
       long timeout = tsdb.getConfig().getLong("tsd.query.timeout");
-      private final Set<String> skips = new HashSet<String>();
-      private final Set<String> keepers = new HashSet<String>();
+      // private final Set<String> skips = new HashSet<String>();
+      // private final Set<String> keepers = new HashSet<String>();
       private final int index = 0;       // only used for salted scanners
       /** nanosecond timestamps */
       private long fetch_start = 0;      // reset each time we send an RPC to HBase
@@ -605,6 +650,10 @@ final class TsdbQuery implements Query {
         }
       }
       
+      public ScannerCB ( Scanner scanner ) {
+    	  this.scanner = scanner;
+      }
+      
       /**
       * Starts the scanner and is called recursively to fetch the next set of
       * rows from the scanner.
@@ -624,11 +673,12 @@ final class TsdbQuery implements Query {
        @Override
        public Object call(final ArrayList<ArrayList<KeyValue>> rows)
          throws Exception {
+    	    
          fetch_time += DateTime.nanoTime() - fetch_start;
          try {
            if (rows == null) {
              scanlatency.add((int)DateTime.msFromNano(fetch_time));
-             LOG.info(TsdbQuery.this + " matched " + nrows + " rows in " +
+             LOG.info(TsdbQuery.this + " matched " + nrows.get() + " rows in " +
                  spans.size() + " spans in " + DateTime.msFromNano(fetch_time) + "ms");
              close(null);
              return null;
@@ -649,7 +699,7 @@ final class TsdbQuery implements Query {
            for (final ArrayList<KeyValue> row : rows) {
              final byte[] key = row.get(0).key();
              if (Bytes.memcmp(metric, key, 0, metric_width) != 0) {
-               scanner.close();
+            	 scanner.close();
                throw new IllegalDataException(
                    "HBase returned a row that doesn't match"
                    + " our scanner (" + scanner + ")! " + row + " does not start"
@@ -762,6 +812,13 @@ final class TsdbQuery implements Query {
              }
              return Deferred.group(lookups).addCallback(new GroupCB());
            } else {
+        	 
+        	  // if reverse scanner only retrieve one set of rows
+        	 if ( scanner.isReversed() ) {
+                 close(null);
+                 return null;
+        	 }
+        	 
              return scan();
            }
          } catch (Exception e) {
@@ -781,7 +838,7 @@ final class TsdbQuery implements Query {
            final DeleteRequest del = new DeleteRequest(tsdb.dataTable(), key);
            tsdb.getClient().delete(del);
          }
-         
+               
          // calculate estimated data point count. We don't want to deserialize
          // the byte arrays so we'll just get a rough estimate of compacted
          // columns.
@@ -824,12 +881,19 @@ final class TsdbQuery implements Query {
          seenAnnotation |= !datapoints.getAnnotations().isEmpty();
          if (compacted != null) { // Can be null if we ignored all KVs.
            datapoints.addRow(compacted);
-           ++nrows;
+           nrows.incrementAndGet();
+           
+	      	 if ( scanner.isReversed() ) {
+	    		 long priorTs = QueryUtil.getTimestampFromKey ( key );
+//	    		 LOG.info("Setting Start time to " + priorTs );
+	    		 setStartTime(priorTs );
+	      	 }
+           // ++nrows;
          }
        }
      
        void close(final Exception e) {
-         scanner.close();
+    	   scanner.close();
          
          if (query_stats != null) {
            query_stats.addScannerStat(query_index, index, 
@@ -865,18 +929,32 @@ final class TsdbQuery implements Query {
                QueryStat.COMPACTION_TIME, compaction_time);
          }
          
-         if (e != null) {
-           results.callback(e);
-         } else if (nrows < 1 && !seenAnnotation) {
-           results.callback(null);
+         final int tasks = completed_tasks.incrementAndGet();
+         
+         if ( tasks >= taskCount || e != null ) {
+        	 
+	         if (e != null) {
+	           results.callback(e);
+	         } else if (nrows.get() < 1 && !seenAnnotation) {
+	           results.callback(null);
+	         } else {
+	           results.callback(spans);
+	         }
          } else {
-           results.callback(spans);
+//        	 LOG.info("RJS Close Result Callback Not Called ! ");
          }
        }
     }
 
-     new ScannerCB().scan();
-     return results;
+    // backfill with older points
+    if ( useBackScanner ) {
+    	// LOG.info("RJS Calling Back Scanner");
+    	new ScannerCB (backScanner).scan();
+    }
+    
+    // LOG.info("RJS Calling Forward Scanner !" );
+    new ScannerCB( scanner ).scan();
+    return results;
   }
 
   /**
@@ -895,11 +973,13 @@ final class TsdbQuery implements Query {
     */
     @Override
     public DataPoints[] call(final TreeMap<byte[], Span> spans) throws Exception {
+      // LOG.info("RJS 00 - GroupByAndAggregateCB");
       if (query_stats != null) {
         query_stats.addStat(query_index, QueryStat.QUERY_SCAN_TIME, 
                 (System.nanoTime() - TsdbQuery.this.scan_start_time));
       }
-      
+      // LOG.info("RJS 01 - GroupByAndAggregateCB");
+
       if (spans == null || spans.size() <= 0) {
         if (query_stats != null) {
           query_stats.addStat(query_index, QueryStat.GROUP_BY_TIME, 0);
@@ -907,11 +987,19 @@ final class TsdbQuery implements Query {
         return NO_RESULT;
       }
       
+      // LOG.info("RJS 02 - GroupByAndAggregateCB");
+
       // The raw aggregator skips group bys and ignores downsampling
       if (aggregator == Aggregators.NONE) {
         final SpanGroup[] groups = new SpanGroup[spans.size()];
         int i = 0;
         for (final Span span : spans.values()) {
+        	
+//          if ( span.size() == 0 ) {
+//        	  LOG.info("RJS Span size is 0 !!");
+//          } else {
+//        	  LOG.info("RJS Attempting to add span for " + span.timestamp(0));
+//          }
           final SpanGroup group = new SpanGroup(
               tsdb, 
               getScanStartTimeSeconds(),
@@ -930,11 +1018,13 @@ final class TsdbQuery implements Query {
         return groups;
       }
       
+//      LOG.info("RJS 03 - GroupByAndAggregateCB");
+
       if (group_bys == null) {
         // We haven't been asked to find groups, so let's put all the spans
         // together in the same group.
         final SpanGroup group = new SpanGroup(tsdb,
-                                              getScanStartTimeSeconds(),
+        									  getScanStartTimeSeconds(),
                                               getScanEndTimeSeconds(),
                                               spans.values(),
                                               rate, rate_options,
@@ -949,6 +1039,8 @@ final class TsdbQuery implements Query {
         return new SpanGroup[] { group };
       }
   
+//      LOG.info("RJS 04 - GroupByAndAggregateCB");
+
       // Maps group value IDs to the SpanGroup for those values. Say we've
       // been asked to group by two things: foo=* bar=* Then the keys in this
       // map will contain all the value IDs combinations we've seen. If the
@@ -1001,6 +1093,9 @@ final class TsdbQuery implements Query {
         }
         thegroup.add(entry.getValue());
       }
+      
+//      LOG.info("RJS 05 - GroupByAndAggregateCB");
+
       //for (final Map.Entry<byte[], SpanGroup> entry : groups) {
       // LOG.info("group for " + Arrays.toString(entry.getKey()) + ": " + entry.getValue());
       //}
@@ -1060,6 +1155,58 @@ final class TsdbQuery implements Query {
     return scanner;
   }
 
+  /**
+   * Returns a scanner set for the given metric (from {@link #metric} or from
+   * the first TSUID in the {@link #tsuids}s list. If one or more tags are 
+   * provided, it calls into {@link #createAndSetFilter} to setup a row key 
+   * filter. If one or more TSUIDs have been provided, it calls into
+   * {@link #createAndSetTSUIDFilter} to setup a row key filter.
+   * @return A scanner to use for fetching data points
+   */
+  protected Scanner getReverseScanner() throws HBaseException {
+    return getReverseScanner(0);
+  }
+  
+  /**
+   * Returns a scanner set for the given metric (from {@link #metric} or from
+   * the first TSUID in the {@link #tsuids}s list. If one or more tags are 
+   * provided, it calls into {@link #createAndSetFilter} to setup a row key 
+   * filter. If one or more TSUIDs have been provided, it calls into
+   * {@link #createAndSetTSUIDFilter} to setup a row key filter.
+   * @param salt_bucket The salt bucket to scan over when salting is enabled.
+   * @return A scanner to use for fetching data points
+   */
+  protected Scanner getReverseScanner(final int salt_bucket) throws HBaseException {
+    final short metric_width = tsdb.metrics.width();
+    
+    // set the metric UID based on the TSUIDs if given, or the metric UID
+    if (tsuids != null && !tsuids.isEmpty()) {
+      final String tsuid = tsuids.get(0);
+      final String metric_uid = tsuid.substring(0, metric_width * 2);
+      metric = UniqueId.stringToUid(metric_uid);
+    }
+    
+    // We search at least one row before and one row after the start & end
+    // time we've been given as it's quite likely that the exact timestamp
+    // we're looking for is in the middle of a row.  Plus, a number of things
+    // rely on having a few extra data points before & after the exact start
+    // & end dates in order to do proper rate calculation or downsampling near
+    // the "edges" of the graph.
+    final Scanner scanner = QueryUtil.getMetricScanner(tsdb, salt_bucket, metric, 
+    		(int) getScanStartTimeSeconds(), 0, 
+		// end_time == UNSET ? -1  // Will scan until the end (0xFFF...).
+		//		: (int) getScanEndTimeSeconds(),
+        		tsdb.table, TSDB.FAMILY());
+    
+    scanner.setReversed(true);
+    if (tsuids != null && !tsuids.isEmpty()) {
+      createAndSetTSUIDFilter(scanner);
+    } else if (filters.size() > 0) {
+      createAndSetFilter(scanner);
+    }
+    return scanner;
+  }
+  
   /** Returns the UNIX timestamp from which we must start scanning.  */
   private long getScanStartTimeSeconds() {
     // Begin with the raw query start time.
@@ -1088,7 +1235,7 @@ final class TsdbQuery implements Query {
     // Don't return negative numbers.
     return timespan_aligned_ts > 0L ? timespan_aligned_ts : 0L;
   }
-
+ 
   /** Returns the UNIX timestamp at which we must stop scanning.  */
   private long getScanEndTimeSeconds() {
     // Begin with the raw query end time.
