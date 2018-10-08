@@ -102,6 +102,10 @@ final class TsdbQuery implements Query {
   
   /** Use reverse scan to retrieve extra data point before starttime, this is to ensure extra point is retrieved if outside of the interval */
   private boolean useBackScanner = false;
+  
+  /** Suppress exception for metric Id not found */
+  private boolean suppressMetricNotFoundException = false;
+  
   private byte[] start_key;
   /**
    * Tags by which we must group the results.
@@ -216,6 +220,14 @@ final class TsdbQuery implements Query {
   
   public boolean getUseBackScanner ( ) {
 	  return this.useBackScanner;
+  }
+  
+  public void setSuppressMetricNotFoundException ( boolean suppressMetricNotFoundException ) {
+	  this.suppressMetricNotFoundException = suppressMetricNotFoundException;
+  }
+  
+  public boolean getSuppressMetricNotFoundException () {
+	  return suppressMetricNotFoundException;
   }
   
   @Override
@@ -336,6 +348,7 @@ final class TsdbQuery implements Query {
     }
     
     useBackScanner = query.getUseBackScanner ();
+    suppressMetricNotFoundException = query.getSuppressMetricNotFoundException();
     
     final TSSubQuery sub_query = query.getQueries().get(index);
     setStartTime(query.startTime());
@@ -403,9 +416,23 @@ final class TsdbQuery implements Query {
         }
       }
       
+      /** Error callback that will capture an exception from AsyncHBase and store
+       * it so we can bubble it up to the caller.
+       */
+      class ErrorCB implements Callback<Object, Exception> {
+        @Override
+        public Object call(final Exception e) throws Exception {
+       	  if ( suppressMetricNotFoundException && e instanceof NoSuchUniqueName ) {
+       	 	return Deferred.fromResult(null);
+       	  }
+       	 
+          return Deferred.fromResult(e);
+        }
+      }
+      
       // fire off the callback chain by resolving the metric first
       return tsdb.metrics.getIdAsync(sub_query.getMetric())
-          .addCallbackDeferring(new MetricCB());
+          .addCallbackDeferring(new MetricCB()).addErrback(new ErrorCB());
     }
   }
   
@@ -575,7 +602,11 @@ final class TsdbQuery implements Query {
     if (Const.SALT_WIDTH() > 0) {
       final List<Scanner> scanners = new ArrayList<Scanner>(Const.SALT_BUCKETS());
       for (int i = 0; i < Const.SALT_BUCKETS(); i++) {
-        scanners.add(getScanner(i));
+    	Scanner scanner = getScanner(i);
+    	
+    	if ( scanner != null ) {
+    		scanners.add( scanner );
+    	}
       }
       scan_start_time = DateTime.nanoTime();
       return new SaltScanner(tsdb, metric, scanners, spans, scanner_filters,
@@ -594,19 +625,27 @@ final class TsdbQuery implements Query {
     
     if ( useBackScanner ) {
     	backScanner = getReverseScanner();
-    	backScanner.setMaxNumRows(1);
+    	
+    	if ( backScanner != null ) {
+    		backScanner.setMaxNumRows(1);
+    	}
     	
 //    	LOG.info("TJS BackScanner Created flag set to " + backScanner.isReversed() + " dump --> " + backScanner.toString() );
     }
     
+    final Deferred<TreeMap<byte[], Span>> results =
+    		new Deferred<TreeMap<byte[], Span>>();
+
     final Scanner scanner = getScanner();
+    if ( scanner == null ) {
+    	return Deferred.fromResult(new TreeMap<byte[], Span>());
+    }
+    
     start_key = Arrays.copyOf(scanner.getCurrentKey(), scanner.getCurrentKey().length );
     
     if (query_stats != null) {
       query_stats.addScannerId(query_index, 0, scanner.toString());
     }
-    final Deferred<TreeMap<byte[], Span>> results =
-      new Deferred<TreeMap<byte[], Span>>();
     
     /**
     * Scanner callback executed recursively each time we get a set of data
@@ -934,7 +973,7 @@ final class TsdbQuery implements Query {
          if ( tasks >= taskCount || e != null ) {
         	 
 	         if (e != null) {
-	           results.callback(e);
+       		   results.callback(e);
 	         } else if (nrows.get() < 1 && !seenAnnotation) {
 	           results.callback(null);
 	         } else {
@@ -1137,6 +1176,10 @@ final class TsdbQuery implements Query {
       metric = UniqueId.stringToUid(metric_uid);
     }
     
+    if ( metric == null ) {
+    	return null;
+    }
+    
     // We search at least one row before and one row after the start & end
     // time we've been given as it's quite likely that the exact timestamp
     // we're looking for is in the middle of a row.  Plus, a number of things
@@ -1184,6 +1227,10 @@ final class TsdbQuery implements Query {
       final String tsuid = tsuids.get(0);
       final String metric_uid = tsuid.substring(0, metric_width * 2);
       metric = UniqueId.stringToUid(metric_uid);
+    }
+    
+    if ( metric == null ) {
+    	return null;
     }
     
     // We search at least one row before and one row after the start & end
