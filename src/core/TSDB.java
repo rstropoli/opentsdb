@@ -99,9 +99,19 @@ public final class TSDB {
   private static short TAG_VALUE_WIDTH = 3;
   private static final int MIN_HISTOGRAM_BYTES = 1;
 
+  /** The operation mode (role) of the TSD. */
+  public enum OperationMode {
+    READWRITE,
+    READONLY,
+    WRITEONLY
+  }
+  
   /** Client for the HBase cluster to use.  */
   final HBaseClient client;
 
+  /** The operation mode (role) of the TSD. */
+  final OperationMode mode;
+  
   /** Name of the table in which timeseries are stored.  */
   final byte[] table;
   /** Name of the table in which UID information is stored. */
@@ -123,6 +133,9 @@ public final class TSDB {
 
   /** Timer used for various tasks such as idle timeouts or query timeouts */
   private final HashedWheelTimer timer;
+
+  /** RpcResponder for doing response asynchronously*/
+  private final RpcResponder rpcResponder;
 
   /**
    * Row keys that need to be compacted.
@@ -218,6 +231,17 @@ public final class TSDB {
       this.client = client;
     }
 
+    String string_mode = config.getString("tsd.mode");
+    if (Strings.isNullOrEmpty(string_mode)) {
+      mode = OperationMode.READWRITE;
+    } else if (string_mode.toLowerCase().equals("ro")) {
+      mode = OperationMode.READONLY;
+    } else if (string_mode.toLowerCase().equals("wo")) {
+      mode = OperationMode.WRITEONLY;
+    } else {
+      mode = OperationMode.READWRITE;
+    }
+    
     // SALT AND UID WIDTHS
     // Users really wanted this to be set via config instead of having to
     // compile. Hopefully they know NOT to change these after writing data.
@@ -322,7 +346,10 @@ public final class TSDB {
 
     // set any extra tags from the config for stats
     StatsCollector.setGlobalTags(config);
-    
+
+
+    rpcResponder = new RpcResponder(config);
+
     LOG.debug(config.dumpConfiguration());
   }
 
@@ -708,19 +735,19 @@ public final class TSDB {
   }
 
   /** Number of cache hits during lookups involving UIDs. */
-  public int uidCacheHits() {
+  public long uidCacheHits() {
     return (metrics.cacheHits() + tag_names.cacheHits()
             + tag_values.cacheHits());
   }
 
   /** Number of cache misses during lookups involving UIDs. */
-  public int uidCacheMisses() {
+  public long uidCacheMisses() {
     return (metrics.cacheMisses() + tag_names.cacheMisses()
             + tag_values.cacheMisses());
   }
 
   /** Number of cache entries currently in RAM for lookups involving UIDs. */
-  public int uidCacheSize() {
+  public long uidCacheSize() {
     return (metrics.cacheSize() + tag_names.cacheSize()
             + tag_values.cacheSize());
   }
@@ -1636,20 +1663,43 @@ public final class TSDB {
       }
     }
 
-    final class HClientShutdown implements Callback<Deferred<Object>, ArrayList<Object>> {
-	public Deferred<Object> call(final ArrayList<Object> args) {
-        if (storage_exception_handler != null) {
-          return client.shutdown().addBoth(new SEHShutdown());
+    final class RpcResponsderShutdown implements Callback<Object, Object> {
+      @Override
+      public Object call(Object arg) throws Exception {
+        try {
+          TSDB.this.rpcResponder.close();
+        } catch (Exception e) {
+          LOG.error(
+              "Run into unknown exception while closing RpcResponder.", e);
+        } finally {
+          return arg;
         }
-        return client.shutdown().addBoth(new FinalShutdown());
       }
-	public String toString() {
+    }
+
+    final class HClientShutdown implements Callback<Deferred<Object>, ArrayList<Object>> {
+      public Deferred<Object> call(final ArrayList<Object> args) {
+        Callback<Object, Object> nextCallback;
+        if (storage_exception_handler != null) {
+          nextCallback = new SEHShutdown();
+        } else {
+          nextCallback = new FinalShutdown();
+        }
+
+        if (TSDB.this.rpcResponder.isAsync()) {
+          client.shutdown().addBoth(new RpcResponsderShutdown());
+        }
+
+        return client.shutdown().addBoth(nextCallback);
+      }
+
+      public String toString() {
         return "shutdown HBase client";
       }
     }
 
     final class ShutdownErrback implements Callback<Object, Exception> {
-	public Object call(final Exception e) {
+      public Object call(final Exception e) {
         final Logger LOG = LoggerFactory.getLogger(ShutdownErrback.class);
         if (e instanceof DeferredGroupException) {
           final DeferredGroupException ge = (DeferredGroupException) e;
@@ -1663,13 +1713,14 @@ public final class TSDB {
         }
         return new HClientShutdown().call(null);
       }
-	public String toString() {
+
+      public String toString() {
         return "shutdown HBase client after error";
       }
     }
 
     final class CompactCB implements Callback<Object, ArrayList<Object>> {
-	public Object call(ArrayList<Object> compactions) throws Exception {
+      public Object call(ArrayList<Object> compactions) throws Exception {
         return null;
       }
     }
@@ -2112,6 +2163,12 @@ public final class TSDB {
     return query_limits;
   }
   
+  /** @return The mode of operation for this TSD. 
+   * @since 2.4 */
+  public OperationMode getMode() {
+    return mode;
+  }
+  
   private final boolean isHistogram(final byte[] qualifier) {
     return (qualifier.length & 0x1) == 1;
   }
@@ -2160,6 +2217,11 @@ public final class TSDB {
   /** Deletes the given cells from the data table. */
   final Deferred<Object> delete(final byte[] key, final byte[][] qualifiers) {
     return client.delete(new DeleteRequest(table, key, FAMILY, qualifiers));
+  }
+
+  /** Do response by RpcResponder */
+  public void response(Runnable run) {
+    rpcResponder.response(run);
   }
 
 }

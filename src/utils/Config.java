@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
+import net.opentsdb.core.RpcResponder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -97,6 +98,9 @@ public class Config {
   /** tsd.storage.fix_duplicates */
   private boolean fix_duplicates = false;
 
+  /** tsd.http.header_tag */
+  private String http_header_tag = null;
+
   /** tsd.http.request.max_chunk */
   private int max_chunked_requests = 4096;
 
@@ -109,6 +113,15 @@ public class Config {
   /** tsd.storage.use_otsdb_timestamp */
   /** Sets the HBase cell timestamp equal to metric timestamp */
   private boolean use_otsdb_timestamp = true;
+
+  /** tsd.storage.get_date_tiered_compaction_start */
+  /** Sets the time at which you started using use_otsdb_timestamp
+   * this value is overriden if you have existing data in your tsdb table
+   * but don't want to re-write the cell timestamps, therefore you can start
+   * set this timestamp to when you start using use_otsdb_timestamp
+   * */
+  private long get_date_tiered_compaction_start = 0;
+
 
   /** tsd.storage.use_max_value */
   /** Used for resolving between data coming in at same timestamp */
@@ -244,6 +257,16 @@ public class Config {
     return scanner_max_num_rows;
   }
 
+  /** @return whether or not additional http header tag is allowed */
+  public boolean enable_header_tag() {
+    return http_header_tag != null ;
+  }
+  
+  /** @return the lookup value for additional http header tag */
+  public String get_name_header_tag() {
+    return http_header_tag ;
+  }
+  
   /** @return whether or not chunked requests are supported */
   public boolean enable_chunked_requests() {
     return enable_chunked_requests;
@@ -271,6 +294,11 @@ public class Config {
   
   public boolean use_otsdb_timestamp() {
     return use_otsdb_timestamp;
+  }
+
+  /** @return the time at which you started storing data using otsdb_timestamp(), if not set defaults to 0 */
+  public long get_date_tiered_compaction_start() {
+    return get_date_tiered_compaction_start;
   }
 
   public boolean use_max_value() {
@@ -311,6 +339,23 @@ public class Config {
    */
   public final int getInt(final String property) {
     return Integer.parseInt(sanitize(properties.get(property)));
+  }
+
+  /**
+   * Returns the given property as an integer.
+   * If no such property is specified, or if the specified value is not a valid
+   * <code>Int</code>, then <code>default_val</code> is returned.
+   *
+   * @param property    The property to load
+   * @param default_val default value
+   * @return A parsed integer or default_val.
+   */
+  public final int getInt(final String property, final int default_val) {
+    try {
+      return getInt(property);
+    } catch (Exception e) {
+      return default_val;
+    }
   }
 
   /**
@@ -391,6 +436,23 @@ public class Config {
     if (val.equals("YES"))
       return true;
     return false;
+  }
+
+  /**
+   * Returns the given property as an boolean.
+   * If no such property is specified, or if the specified value is not a valid
+   * <code>boolean</code>, then <code>default_val</code> is returned.
+   *
+   * @param property    The property to load
+   * @param default_val default value
+   * @return A parsed boolean or default_val.
+   */
+  public final boolean getBoolean(final String property, final boolean default_val) {
+    try {
+      return getBoolean(property);
+    } catch (Exception e) {
+      return default_val;
+    }
   }
 
   /**
@@ -516,7 +578,6 @@ public class Config {
     default_map.put("tsd.core.connections.limit", "0");
     default_map.put("tsd.core.enable_api", "true");
     default_map.put("tsd.core.enable_ui", "true");
-    default_map.put("tsd.core.hist_decoder", "net.opentsdb.core.SimpleHistogramDecoder");
     default_map.put("tsd.core.meta.enable_realtime_ts", "false");
     default_map.put("tsd.core.meta.enable_realtime_uid", "false");
     default_map.put("tsd.core.meta.enable_tsuid_incrementing", "false");
@@ -576,10 +637,15 @@ public class Config {
     default_map.put("tsd.storage.compaction.max_concurrent_flushes", "10000");
     default_map.put("tsd.storage.compaction.flush_speed", "2");
     default_map.put("tsd.timeseriesfilter.enable", "false");
+    default_map.put("tsd.uid.use_mode", "false");
+    default_map.put("tsd.uid.lru.enable", "false");
+    default_map.put("tsd.uid.lru.name.size", "5000000");
+    default_map.put("tsd.uid.lru.id.size", "5000000");
     default_map.put("tsd.uidfilter.enable", "false");
     default_map.put("tsd.core.stats_with_port", "false");
     default_map.put("tsd.http.show_stack_trace", "true");
     default_map.put("tsd.http.query.allow_delete", "false");
+    default_map.put("tsd.http.header_tag", "");
     default_map.put("tsd.http.request.enable_chunked", "false");
     default_map.put("tsd.http.request.max_chunk", "4096");
     default_map.put("tsd.http.request.cors_domains", "");
@@ -587,8 +653,9 @@ public class Config {
       + "Content-Type, Accept, Origin, User-Agent, DNT, Cache-Control, "
       + "X-Mx-ReqToken, Keep-Alive, X-Requested-With, If-Modified-Since");
     default_map.put("tsd.query.timeout", "0");
-    default_map.put("tsd.storage.use_otsdb_timestamp", "true");
+    default_map.put("tsd.storage.use_otsdb_timestamp", "false");
     default_map.put("tsd.storage.use_max_value", "true");
+    default_map.put("tsd.storage.get_date_tiered_compaction_start", "0");
 
     for (Map.Entry<String, String> entry : default_map.entrySet()) {
       if (!properties.containsKey(entry.getKey()))
@@ -699,10 +766,14 @@ public class Config {
     if (this.hasProperty("tsd.http.request.max_chunk")) {
       max_chunked_requests = this.getInt("tsd.http.request.max_chunk");
     }
+    if (this.hasProperty("tsd.http.header_tag")) {
+      http_header_tag = this.getString("tsd.http.header_tag");
+    }
     enable_tree_processing = this.getBoolean("tsd.core.tree.enable_processing");
     fix_duplicates = this.getBoolean("tsd.storage.fix_duplicates");
     scanner_max_num_rows = this.getInt("tsd.storage.hbase.scanner.maxNumRows");
     use_otsdb_timestamp = this.getBoolean("tsd.storage.use_otsdb_timestamp");
+    get_date_tiered_compaction_start = this.getLong("tsd.storage.get_date_tiered_compaction_start");
     use_max_value = this.getBoolean("tsd.storage.use_max_value");
   }
 
