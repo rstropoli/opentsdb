@@ -1,74 +1,88 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2015-2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.query.pojo;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
+
+import org.junit.BeforeClass;
+
+import net.opentsdb.core.MockTSDB;
+import net.opentsdb.core.MockTSDBDefault;
 import net.opentsdb.query.pojo.Downsampler;
 import net.opentsdb.utils.JSON;
 
 import org.junit.Test;
 
 public class TestDownsampler {
+
+  public static MockTSDB TSDB;
+  
+  @BeforeClass
+  public static void beforeClass() {
+    TSDB = MockTSDBDefault.getMockTSDB();
+  }
   
   @Test(expected = IllegalArgumentException.class)
   public void validationErrorWhenIntervalIsNull() throws Exception {
     String json = "{\"aggregator\":\"sum\"}";
     Downsampler downsampler = JSON.parseToObject(json, Downsampler.class);
-    downsampler.validate();
+    downsampler.validate(TSDB);
   }
   
   @Test(expected = IllegalArgumentException.class)
   public void validationErrorWhenIntervalIsEmpty() throws Exception {
     String json = "{\"interval\":\"\",\"aggregator\":\"sum\"}";
     Downsampler downsampler = JSON.parseToObject(json, Downsampler.class);
-    downsampler.validate();
+    downsampler.validate(TSDB);
   }
   
   @Test(expected = IllegalArgumentException.class)
   public void validationErrorWhenIntervalIsInvalid() throws Exception {
     String json = "{\"interval\":\"45foo\",\"aggregator\":\"sum\"}";
     Downsampler downsampler = JSON.parseToObject(json, Downsampler.class);
-    downsampler.validate();
+    downsampler.validate(TSDB);
   }
   
   @Test(expected = IllegalArgumentException.class)
   public void validationErrorWhenAggregatorIsNull() throws Exception {
     String json = "{\"interval\":\"1h\"}";
     Downsampler downsampler = JSON.parseToObject(json, Downsampler.class);
-    downsampler.validate();
+    downsampler.validate(TSDB);
   }
   
   @Test(expected = IllegalArgumentException.class)
   public void validationErrorWhenAggregatorIsEmpty() throws Exception {
     String json = "{\"interval\":\"1h\",\"aggregator\":\"\"}";
     Downsampler downsampler = JSON.parseToObject(json, Downsampler.class);
-    downsampler.validate();
+    downsampler.validate(TSDB);
   }
   
   @Test(expected = IllegalArgumentException.class)
   public void validationErrorWhenAggregatorIsInvalid() throws Exception {
     String json = "{\"interval\":\"1h\",\"aggregator\":\"no such agg\"}";
     Downsampler downsampler = JSON.parseToObject(json, Downsampler.class);
-    downsampler.validate();
+    downsampler.validate(TSDB);
   }
   
   @Test
   public void deserialize() throws Exception {
     String json = "{\"interval\":\"1h\",\"aggregator\":\"zimsum\"}";
     Downsampler downsampler = JSON.parseToObject(json, Downsampler.class);
-    downsampler.validate();
+    downsampler.validate(TSDB);
     Downsampler expected = Downsampler.newBuilder()
         .setInterval("1h")
         .setAggregator("zimsum")
@@ -79,7 +93,7 @@ public class TestDownsampler {
         + "\"fillPolicy\":{\"policy\":\"nan\"},\"useCalendar\":true,"
         + "\"timezone\":\"PST\"}";
     downsampler = JSON.parseToObject(json, Downsampler.class);
-    downsampler.validate();
+    downsampler.validate(TSDB);
     expected = Downsampler.newBuilder()
         .setInterval("1h")
         .setAggregator("zimsum")
@@ -92,7 +106,7 @@ public class TestDownsampler {
     json = "{\"interval\":\"1h\",\"aggregator\":\"zimsum\","
         + "\"fillPolicy\":{\"policy\":\"nan\"},\"junkfield\":true}";
     downsampler = JSON.parseToObject(json, Downsampler.class);
-    downsampler.validate();
+    downsampler.validate(TSDB);
     expected = Downsampler.newBuilder()
         .setInterval("1h").setAggregator("zimsum")
         .setFillPolicy(new NumericFillPolicy(FillPolicy.NOT_A_NUMBER)).build();

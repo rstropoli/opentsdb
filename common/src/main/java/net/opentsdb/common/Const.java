@@ -1,26 +1,41 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2010-2012  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.common;
 
 import java.nio.charset.Charset;
-import java.util.TimeZone;
+import java.time.ZoneId;
 
 import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hashing;
+import com.google.common.reflect.TypeToken;
+
+import net.opentsdb.data.TimeSeriesByteId;
+import net.opentsdb.data.TimeSeriesId;
+import net.opentsdb.data.TimeSeriesStringId;
 
 /** Constants used in various places.  */
 public final class Const {
 
+  /** The type token for string time series IDs. */
+  public static final TypeToken<? extends TimeSeriesId> TS_STRING_ID = 
+      TypeToken.of(TimeSeriesStringId.class);
+  
+  /** The type token for byte time series IDs. */
+  public static final TypeToken<? extends TimeSeriesId> TS_BYTE_ID = 
+      TypeToken.of(TimeSeriesByteId.class);
+  
   /** Number of bytes on which a timestamp is encoded.  */
   public static final short TIMESTAMP_BYTES = 4;
 
@@ -45,18 +60,22 @@ public final class Const {
     MAX_NUM_TAGS = tags;
   }
   
-  /** The default ASCII character set for encoding tables and qualifiers that
-   * don't depend on user input that may be encoded with UTF.
-   * Charset to use with our server-side row-filter.
-   * We use this one because it preserves every possible byte unchanged.
+  /** The default extended ASCII character set for encoding tables and 
+   * qualifiers that don't depend on user input that may be encoded with 
+   * UTF. Charset to use with our server-side row-filter. This was used
+   * in 1.x and 2.x. We use this one because it preserves every 
+   * possible byte unchanged.
    */
-  public static final Charset ASCII_CHARSET = Charset.forName("ISO-8859-1");
+  public static final Charset ISO_8859_CHARSET = Charset.forName("ISO-8859-1");
+  
+  /** Just the basic ASCII character set. */
+  public static final Charset ASCII_US_CHARSET = Charset.forName("US-ASCII");
   
   /** Used for metrics, tags names and tag values */
   public static final Charset UTF8_CHARSET = Charset.forName("UTF8");
   
   /** The UTC timezone used for rollup and calendar conversions */
-  public static final TimeZone UTC_TZ = TimeZone.getTimeZone("UTC");
+  public static final ZoneId UTC = ZoneId.of("UTC");
 
   /** Number of LSBs in time_deltas reserved for flags.  */
   public static final short FLAG_BITS = 4;
@@ -184,4 +203,5 @@ public final class Const {
     }
     SALT_WIDTH = width;
   }
+
 }

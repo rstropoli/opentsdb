@@ -1,16 +1,24 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2015-2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.query.pojo;
+
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -19,10 +27,19 @@ import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonPOJOBuilder;
 import com.google.common.base.Objects;
+import com.google.common.base.Strings;
 import com.google.common.collect.ComparisonChain;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.google.common.hash.HashCode;
 
+import net.opentsdb.configuration.Configuration;
 import net.opentsdb.core.Const;
+import net.opentsdb.core.TSDB;
+import net.opentsdb.query.QueryNode;
+import net.opentsdb.query.QueryNodeConfig;
+import net.opentsdb.query.processor.rate.RateFactory;
+import net.opentsdb.utils.DateTime;
 
 /**
  * Provides additional options that will be used when calculating rates. These
@@ -37,11 +54,20 @@ import net.opentsdb.core.Const;
 @JsonInclude(Include.NON_DEFAULT)
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonDeserialize(builder = RateOptions.Builder.class)
-public class RateOptions extends Validatable implements Comparable<RateOptions> {
+public class RateOptions extends Validatable implements QueryNodeConfig {
   public static final long DEFAULT_RESET_VALUE = 0;
-  public static final long DEFAULT_INTERVAL = 60000;
+  public static final String DEFAULT_INTERVAL = "1s";
   public static final long DEFAULT_COUNTER_MAX = Long.MAX_VALUE;
 
+  /** The ID of this config. */
+  private String id;
+  
+  /** The class of an {@link QueryNode} implementation. */
+  private final String type;
+  
+  /** An optional list of downstream sources. */
+  private final List<String> sources;
+  
   /**
    * If true, then when calculating a rate of change assume that the metric
    * values are counters and thus non-zero, always increasing and wrap around at
@@ -65,23 +91,39 @@ public class RateOptions extends Validatable implements Comparable<RateOptions> 
    */
   private long reset_value;
   
-  /** The rate interval in milliseconds. Default is 60 seconds as per TSDB 1/2 */
-  private long interval = DEFAULT_INTERVAL;
+  /** The rate interval in duration format. Default is 1 seconds as per TSDB 1/2 */
+  private String interval = DEFAULT_INTERVAL;
 
+  private Duration duration;
+  private ChronoUnit units;
+  
+  protected final Map<String, String> overrides;
+  
   /** Used for Jackson non-default serdes. */
   protected RateOptions() {
-    
+    type = null;
+    sources = null;
+    overrides = null;
   }
   
   /**
    * Ctor
    */
   protected RateOptions(final Builder builder) {
+    id = builder.id;
+    type = builder.type;
+    sources = builder.sources == null ? Collections.emptyList() : 
+      builder.sources;
     counter = builder.counter;
     drop_resets = builder.dropResets;
     counter_max = builder.counterMax;
     reset_value = builder.resetValue;
     interval = builder.interval;
+    overrides = builder.overrides;
+    
+    final long interval_part = DateTime.getDurationInterval(interval);
+    units = DateTime.unitsToChronoUnit(DateTime.getDurationUnits(interval));
+    duration = Duration.of(interval_part, units);
   }
   
   /** @return Whether or not the counter flag is set */
@@ -104,10 +146,53 @@ public class RateOptions extends Validatable implements Comparable<RateOptions> 
     return drop_resets;
   }
   
-  /** @return The rate interval in milliseconds. Default is 60 seconds as 
+  /** @return The rate interval in duration format. Default is 1 seconds as 
    * per TSDB 1/2. */
-  public long getInterval() {
+  public String getInterval() {
     return interval;
+  }
+
+  @Override
+  public String getId() {
+    return id;
+  }
+  
+  @Override
+  public String getType() {
+    return type;
+  }
+
+  @Override
+  public List<String> getSources() {
+    return sources;
+  }
+  
+  /** @return The duration of the rate to convert to. E.g. per second or per
+   * 8 seconds, etc. */
+  public Duration duration() {
+    return duration;
+  }
+  
+  /** @return The parsed units of the interval. */
+  public ChronoUnit units() {
+    return units;
+  }
+  
+  @Override
+  public Builder toBuilder() {
+    // TODO Auto-generated method stub
+    return null;
+  }
+  
+  @Override
+  public boolean pushDown() {
+    // TODO Auto-generated method stub
+    return false;
+  }
+  
+  @Override
+  public boolean joins() {
+    return false;
   }
   
   /**
@@ -128,10 +213,114 @@ public class RateOptions extends Validatable implements Comparable<RateOptions> 
   /** Validates the config
    * @throws IllegalArgumentException if one or more parameters were invalid
    */
-  public void validate() {
-    if (interval < 1) {
-      throw new IllegalArgumentException("Interval cannot be less than 1 ms.");
+  public void validate(final TSDB tsdb) {
+    if (Strings.isNullOrEmpty(interval)) {
+      throw new IllegalArgumentException("Interval cannot be null or empty.");
     }
+    DateTime.parseDuration2(interval);
+  }
+  
+  @Override
+  public Map<String, String> getOverrides() {
+    return overrides;
+  }
+  
+  @Override
+  public String getString(final Configuration config, final String key) {
+    if (config == null) {
+      throw new IllegalArgumentException("Config cannot be null");
+    }
+    if (Strings.isNullOrEmpty(key)) {
+      throw new IllegalArgumentException("Key cannot be null or empty.");
+    }
+    String value = overrides == null ? null : overrides.get(key);
+    if (Strings.isNullOrEmpty(value)) {
+      if (config.hasProperty(key)) {
+        return config.getString(key);
+      }
+    }
+    return value;
+  }
+  
+  @Override
+  public int getInt(final Configuration config, final String key) {
+    if (config == null) {
+      throw new IllegalArgumentException("Config cannot be null");
+    }
+    if (Strings.isNullOrEmpty(key)) {
+      throw new IllegalArgumentException("Key cannot be null or empty.");
+    }
+    String value = overrides == null ? null : overrides.get(key);
+    if (Strings.isNullOrEmpty(value)) {
+      if (config.hasProperty(key)) {
+        return config.getInt(key);
+      }
+      throw new IllegalArgumentException("No value for key '" + key + "'");
+    }
+    return Integer.parseInt(value);
+  }
+  
+  @Override
+  public long getLong(final Configuration config, final String key) {
+    if (config == null) {
+      throw new IllegalArgumentException("Config cannot be null");
+    }
+    if (Strings.isNullOrEmpty(key)) {
+      throw new IllegalArgumentException("Key cannot be null or empty.");
+    }
+    String value = overrides == null ? null : overrides.get(key);
+    if (Strings.isNullOrEmpty(value)) {
+      if (config.hasProperty(key)) {
+        return config.getInt(key);
+      }
+      throw new IllegalArgumentException("No value for key '" + key + "'");
+    }
+    return Long.parseLong(value);
+  }
+  
+  @Override
+  public boolean getBoolean(final Configuration config, final String key) {
+    if (config == null) {
+      throw new IllegalArgumentException("Config cannot be null");
+    }
+    if (Strings.isNullOrEmpty(key)) {
+      throw new IllegalArgumentException("Key cannot be null or empty.");
+    }
+    String value = overrides == null ? null : overrides.get(key);
+    if (Strings.isNullOrEmpty(value)) {
+      if (config.hasProperty(key)) {
+        return config.getBoolean(key);
+      }
+      throw new IllegalArgumentException("No value for key '" + key + "'");
+    }
+    value = value.trim().toLowerCase();
+    return value.equals("true") || value.equals("1") || value.equals("yes");
+  }
+  
+  @Override
+  public double getDouble(final Configuration config, final String key) {
+    if (config == null) {
+      throw new IllegalArgumentException("Config cannot be null");
+    }
+    if (Strings.isNullOrEmpty(key)) {
+      throw new IllegalArgumentException("Key cannot be null or empty.");
+    }
+    String value = overrides == null ? null : overrides.get(key);
+    if (Strings.isNullOrEmpty(value)) {
+      if (config.hasProperty(key)) {
+        return config.getInt(key);
+      }
+      throw new IllegalArgumentException("No value for key '" + key + "'");
+    }
+    return Double.parseDouble(value);
+  }
+  
+  @Override
+  public boolean hasKey(final String key) {
+    if (Strings.isNullOrEmpty(key)) {
+      throw new IllegalArgumentException("Key cannot be null or empty.");
+    }
+    return overrides == null ? false : overrides.containsKey(key);
   }
   
   @Override
@@ -160,18 +349,22 @@ public class RateOptions extends Validatable implements Comparable<RateOptions> 
         .putBoolean(drop_resets)
         .putLong(counter_max)
         .putLong(reset_value)
-        .putLong(interval)
+        .putString(interval, Const.UTF8_CHARSET)
         .hash();
   }
   
   @Override
-  public int compareTo(final RateOptions o) {
+  public int compareTo(final QueryNodeConfig o) {
+    if (!(o instanceof RateOptions)) {
+      return -1;
+    }
+    final RateOptions other = (RateOptions) o;
     return ComparisonChain.start()
-        .compareTrueFirst(counter, o.counter)
-        .compareTrueFirst(drop_resets, o.drop_resets)
-        .compare(counter_max, o.counter_max)
-        .compare(reset_value, o.reset_value)
-        .compare(interval, o.interval)
+        .compareTrueFirst(counter, other.counter)
+        .compareTrueFirst(drop_resets, other.drop_resets)
+        .compare(counter_max, other.counter_max)
+        .compare(reset_value, other.reset_value)
+        .compare(interval, other.interval)
         .result();
   }
   
@@ -204,7 +397,13 @@ public class RateOptions extends Validatable implements Comparable<RateOptions> 
    */
   @JsonIgnoreProperties(ignoreUnknown = true)
   @JsonPOJOBuilder(buildMethodName = "build", withPrefix = "")
-  public static final class Builder {
+  public static final class Builder implements QueryNodeConfig.Builder {
+    @JsonProperty
+    private String id;
+    @JsonProperty
+    private String type;
+    @JsonProperty
+    private List<String> sources;
     @JsonProperty
     private boolean counter;
     @JsonProperty
@@ -214,7 +413,49 @@ public class RateOptions extends Validatable implements Comparable<RateOptions> 
     @JsonProperty
     private long resetValue = DEFAULT_RESET_VALUE;
     @JsonProperty
-    private long interval = DEFAULT_INTERVAL;
+    private String interval = DEFAULT_INTERVAL;
+    @JsonProperty
+    protected Map<String, String> overrides;
+    
+    Builder() {
+      setType(RateFactory.TYPE);
+    }
+    
+    public Builder setId(final String id) {
+      this.id = id;
+      return this;
+    }
+    
+    /**
+     * @param type The class of the implementation.
+     * @return The builder.
+     */
+    public Builder setType(final String type) {
+      this.type = type;
+      return this;
+    }
+    
+    /**
+     * @param sources An optional list of sources consisting of the IDs 
+     * of a nodes in the graph.
+     * @return The builder.
+     */
+    public Builder setSources(final List<String> sources) {
+      this.sources = sources;
+      return this;
+    }
+    
+    /**
+     * @param source A source to pull from for this node.
+     * @return The builder.
+     */
+    public Builder addSource(final String source) {
+      if (sources == null) {
+        sources = Lists.newArrayListWithExpectedSize(1);
+      }
+      sources.add(source);
+      return this;
+    }
     
     public Builder setCounter(final boolean counter) {
       this.counter = counter;
@@ -236,8 +477,21 @@ public class RateOptions extends Validatable implements Comparable<RateOptions> 
       return this;
     }
     
-    public Builder setInterval(final long interval) {
+    public Builder setInterval(final String interval) {
       this.interval = interval;
+      return this;
+    }
+
+    public Builder setOverrides(final Map<String, String> overrides) {
+      this.overrides = overrides;
+      return this;
+    }
+    
+    public Builder addOverride(final String key, final String value) {
+      if (overrides == null) {
+        overrides = Maps.newHashMap();
+      }
+      overrides.put(key, value);
       return this;
     }
     
@@ -245,4 +499,5 @@ public class RateOptions extends Validatable implements Comparable<RateOptions> 
       return new RateOptions(this);
     }
   }
+  
 }

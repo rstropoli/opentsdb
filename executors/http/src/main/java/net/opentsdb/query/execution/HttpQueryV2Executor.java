@@ -1,15 +1,17 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.query.execution;
 
 import java.io.IOException;
@@ -54,25 +56,23 @@ import com.stumbleupon.async.Callback;
 
 import io.opentracing.Span;
 import net.opentsdb.core.Const;
+import net.opentsdb.core.TSDB;
 import net.opentsdb.data.SimpleStringGroupId;
-import net.opentsdb.data.SimpleStringTimeSeriesId;
-import net.opentsdb.data.iterators.DefaultIteratorGroup;
-import net.opentsdb.data.iterators.DefaultIteratorGroups;
-import net.opentsdb.data.iterators.IteratorGroup;
-import net.opentsdb.data.iterators.IteratorGroups;
+import net.opentsdb.data.BaseTimeSeriesStringId;
 import net.opentsdb.data.types.numeric.NumericMillisecondShard;
 import net.opentsdb.data.types.numeric.NumericType;
 import net.opentsdb.exceptions.QueryExecutionCanceled;
 import net.opentsdb.exceptions.QueryExecutionException;
 import net.opentsdb.exceptions.RemoteQueryExecutionException;
+import net.opentsdb.query.BaseQueryNodeConfig;
+import net.opentsdb.query.QueryNode;
+import net.opentsdb.query.QueryNodeConfig;
 import net.opentsdb.query.TSQuery;
 import net.opentsdb.query.TSSubQuery;
-import net.opentsdb.query.context.QueryContext;
 import net.opentsdb.query.execution.QueryExecutor;
-import net.opentsdb.query.execution.graph.ExecutionGraphNode;
-import net.opentsdb.query.filter.TagVFilter;
 import net.opentsdb.query.pojo.Filter;
 import net.opentsdb.query.pojo.Metric;
+import net.opentsdb.query.pojo.TagVFilter;
 import net.opentsdb.query.pojo.TimeSeriesQuery;
 import net.opentsdb.stats.TsdbTrace;
 import net.opentsdb.utils.JSON;
@@ -88,7 +88,7 @@ import net.opentsdb.utils.JSONException;
  * 
  * @since 3.0
  */
-public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
+public class HttpQueryV2Executor {
   private static final Logger LOG = LoggerFactory.getLogger(
       HttpQueryV2Executor.class);
 
@@ -105,32 +105,33 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
    * @throws IllegalStateException if the remote context was not an instance
    * of HttpContext.
    */
-  public HttpQueryV2Executor(final ExecutionGraphNode node) {
-    super(node);
-    if (((Config) node.getDefaultConfig()) == null) {
-      throw new IllegalArgumentException("Config connot be null.");
-    }
-    if (Strings.isNullOrEmpty(((Config) node.getDefaultConfig()).endpoint)) {
-      default_endpoint = null;
-    } else {
-      default_endpoint = ((Config) node.getDefaultConfig()).endpoint + "/api/query";
-    }
+  public HttpQueryV2Executor() {
+    super();
+    default_endpoint = "";
+//    if (((Config) node.getConfig()) == null) {
+//      throw new IllegalArgumentException("Config connot be null.");
+//    }
+//    if (Strings.isNullOrEmpty(((Config) node.getConfig()).endpoint)) {
+//      default_endpoint = null;
+//    } else {
+//      default_endpoint = ((Config) node.getConfig()).endpoint + "/api/query";
+//    }
   }
   
-  @Override
-  public QueryExecution<IteratorGroups> executeQuery(
-      final QueryContext context,
-      final TimeSeriesQuery query,
-      final Span upstream_span) {
-    if (query == null) {
-      throw new IllegalArgumentException("Query cannot be null.");
-    }
-    
-    final Execution exec = new Execution(context, query, upstream_span);
-    outstanding_executions.add(exec);
-    exec.execute();
-    return exec;
-  }
+//  @Override
+//  public QueryExecution<IteratorGroups> executeQuery(
+//      final QueryContext context,
+//      final TimeSeriesQuery query,
+//      final Span upstream_span) {
+//    if (query == null) {
+//      throw new IllegalArgumentException("Query cannot be null.");
+//    }
+//    
+//    final Execution exec = new Execution(context, query, upstream_span);
+//    outstanding_executions.add(exec);
+//    exec.execute();
+//    return exec;
+//  }
   
   /**
    * Parses the HTTP response making sure it's a 200 with a content body.
@@ -201,16 +202,15 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
   @VisibleForTesting
   void parseTSQuery(final TimeSeriesQuery query, 
                           final JsonNode node,
-                          final Span tracer_span,
-                          final Map<String, IteratorGroup> groups) {
+                          final Span tracer_span) {
     if (query == null) {
       throw new IllegalArgumentException("Query cannot be null.");
     }
     if (node == null) {
       throw new IllegalArgumentException("Node cannot be null.");
     }
-    final SimpleStringTimeSeriesId.Builder id = 
-        SimpleStringTimeSeriesId.newBuilder();
+    final BaseTimeSeriesStringId.Builder id = 
+        BaseTimeSeriesStringId.newBuilder();
     
     final String metric;
     if (node.has("metric")) {
@@ -218,21 +218,21 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
         throw new JSONException("Metric was null for query result: " + node);
       }
       metric = node.path("metric").asText();
-      id.addMetric(metric);
+      id.setMetric(metric);
     } else {
       throw new JSONException("No metric found for the series: " + node);
     }
-    IteratorGroup group = null;
-    for (final Metric m : query.getMetrics()) {
-      if (m.getMetric().equals(metric)) {
-        group = groups.get(m.getId());
-        break;
-      }
-    }
-    if (group == null) {
-      throw new IllegalStateException("Couldn't find a group for metric: " 
-          + metric);
-    }
+//    IteratorGroup group = null;
+//    for (final Metric m : query.getMetrics()) {
+//      if (m.getMetric().equals(metric)) {
+//        group = groups.get(m.getId());
+//        break;
+//      }
+//    }
+//    if (group == null) {
+//      throw new IllegalStateException("Couldn't find a group for metric: " 
+//          + metric);
+//    }
     
     parseTags(id, node.path("tags"));
     parseAggTags(id, node.path("aggregateTags"));
@@ -254,12 +254,12 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
         final String v = value.getValue().asText();
         if (v.startsWith("N") || v.startsWith("n")) {
           // nulls and NaNs.
-          shard.add(Long.parseLong(value.getKey()), Double.NaN, 0);
+          shard.add(Long.parseLong(value.getKey()), Double.NaN);
         } else if (NumericType.looksLikeInteger(v)) {
-          shard.add(Long.parseLong(value.getKey()), NumericType.parseLong(v), 1);
+          shard.add(Long.parseLong(value.getKey()), NumericType.parseLong(v));
         } else {
           final double parsed = Double.parseDouble(v);
-          shard.add(Long.parseLong(value.getKey()), parsed, 1);
+          shard.add(Long.parseLong(value.getKey()), parsed);
           if (!Double.isFinite(parsed)) {
             ++nans;
           }
@@ -278,7 +278,7 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
       tracer_span.setTag("totalValues", values);
     }
     
-    group.addIterator(shard);
+    //group.addIterator(shard);
   }
   
   /**
@@ -287,7 +287,7 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
    * @param tags A pointer to the tags node in the JSON tree.
    * @throws JSONException if any key or value in the tag map is null.
    */
-  private void parseTags(final SimpleStringTimeSeriesId.Builder id, 
+  private void parseTags(final BaseTimeSeriesStringId.Builder id, 
       final JsonNode tags) {
     if (tags != null) {
       final Iterator<Entry<String, JsonNode>> pairs = tags.fields();
@@ -308,7 +308,7 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
    * @param agg_tags A pointer to the aggregated tags node in the JSON tree.
    * @throws JSONException if any of the tags are null.
    */
-  private void parseAggTags(final SimpleStringTimeSeriesId.Builder id, 
+  private void parseAggTags(final BaseTimeSeriesStringId.Builder id, 
       final JsonNode agg_tags) {
     if (agg_tags != null) {
       for (final JsonNode tag : agg_tags) {
@@ -321,365 +321,367 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
   }
 
   /** An implementation that allows for canceling the future. */
-  class Execution extends QueryExecution<IteratorGroups> {
-    final QueryContext context;
-    
-    /** The client used for communications. */
-    private final CloseableHttpAsyncClient client;
-    
-    /** The Future returned by the client so we can cancel it if we need to. */
-    private Future<HttpResponse> future;
-    
-    /** The endpoint to hit. */
-    private final String endpoint;
-    
-    public Execution(final QueryContext context, 
-        final TimeSeriesQuery query, final Span upstream_span) {
-      super(query);
-      this.context = context;
-      
-      // TODO - tune this sucker and share a bit.
-      client = HttpAsyncClients.custom()
-          .setDefaultIOReactorConfig(IOReactorConfig.custom()
-              .setIoThreadCount(1).build())
-          .setMaxConnTotal(1)
-          .setMaxConnPerRoute(1)
-          .build();
-      client.start();
-      
-      deferred.addCallback(new FutureRemover(future))
-              .addErrback(new FutureExceptionRemover(future));
-      if (context.getTracer() != null) {
-        setSpan(context, 
-            HttpQueryV2Executor.this.getClass().getSimpleName(), 
-            upstream_span,
-            TsdbTrace.addTags(
-                "order", Integer.toString(query.getOrder()),
-                "query", JSON.serializeToString(query),
-                "startThread", Thread.currentThread().getName()));
-      }
-
-      final Config override = 
-          (Config) context.getConfigOverride(node.getExecutorId());
-      if (override != null && !Strings.isNullOrEmpty(override.endpoint)) {
-        endpoint = override.endpoint + "/api/query";
-      } else {
-        endpoint = default_endpoint;
-      }
-      if (Strings.isNullOrEmpty(endpoint)) {
-        throw new IllegalStateException("No endpoint was provided via default "
-            + "or override for: " + this);
-      }
-    }
-    
-    @SuppressWarnings("unchecked")
-    public void execute() {
-      final String json;
-      try {
-      json = JSON.serializeToString(convertQuery(query));
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Sending JSON to http endpoint: " + json);
-        }
-      } catch (Exception e) {
-        try {
-          final Exception ex = new RejectedExecutionException(
-              "Failed to convert query", e);
-          callback(ex, TsdbTrace.exceptionTags(ex));
-        } catch (IllegalStateException ex) {
-           LOG.error("Unexpected state halting execution with a failed "
-               + "conversion: " + this);
-        } catch (Exception ex) {
-          LOG.error("Unexpected exception halting execution with a failed "
-              + "conversion: " + this);
-        }
-        return;
-      }
-      
-      final HttpPost post = new HttpPost(endpoint);
-      final Object session_headers = context.getSessionObject(
-          SESSION_HEADERS_KEY);
-      if (session_headers != null) {
-        try {
-          for (final Entry<String, String> header :
-              ((Map<String, String>) session_headers).entrySet()) {
-            post.setHeader(header.getKey(), header.getValue());
-          }
-        } catch (ClassCastException ex) {
-          final Exception ise = new IllegalStateException(
-            "Session headers were not a map: " + session_headers.getClass(),
-            ex);
-          try {
-            callback(ise, TsdbTrace.exceptionTags(ise));
-          } catch (final IllegalStateException ignored) {
-            LOG.error("Unexpected state halting execution with mistyped "
-                + "session headers: " + this);
-          } catch (final Exception ignored) {
-            LOG.error("Unexpected exception halting execution with mistyped "
-                + "session headers: " + this);
-          }
-          return;
-        }
-      }
-      try {
-        post.setEntity(new StringEntity(json));
-      } catch (UnsupportedEncodingException e) {
-        try {
-          final Exception ex = new RejectedExecutionException(
-              "Failed to generate request", e);
-          callback(ex, TsdbTrace.exceptionTags(ex));
-        } catch (IllegalStateException ex) {
-            LOG.error("Unexpected state halting execution with a failed "
-                + "conversion: " + this);
-         } catch (Exception ex) {
-           LOG.error("Unexpected exception halting execution with a failed "
-               + "conversion: " + this);
-         }
-        return;
-      }
-      
-      /** Does the fun bit of parsing the response and calling the deferred. */
-      class ResponseCallback implements FutureCallback<HttpResponse> {      
-        @Override
-        public void cancelled() {
-          if (LOG.isDebugEnabled()) {
-            LOG.debug("Http query was canceled: " + this);
-          }
-          if (completed.get()) {
-            return;
-          }
-          try {
-            final Exception e = new QueryExecutionCanceled(
-                "Query was canceled: " + endpoint, 400, query.getOrder()); 
-            callback(e,
-                TsdbTrace.canceledTags(e));
-          } catch (IllegalStateException e) {
-            // already called, ignore it.
-          } catch (Exception e) {
-            LOG.warn("Exception thrown when calling deferred on cancel: " 
-                + this, e);
-          }
-        }
-
-        @Override
-        public void completed(final HttpResponse response) {
-          String host = "unknown";
-          for (final Header header : response.getAllHeaders()) {
-            if (header.getName().equals("X-Served-By")) {
-              host = header.getValue();
-            }
-          }
-          if (LOG.isDebugEnabled()) {
-            LOG.debug("Response from endpoint: " + endpoint + " (" + host 
-                + ") received");
-          }
-          if (completed.get()) {
-            if (LOG.isDebugEnabled()) {
-              LOG.debug("Successfully received response [" + response 
-                  + "] but execution was already marked complete. " + this);
-            }
-            try {
-              EntityUtils.consume(response.getEntity());
-            } catch (Exception e) {
-              LOG.error("Unexpected exception consuming response: " + this, e);
-            }
-            return;
-          }
-          try {
-            final String json = parseResponse(response, query.getOrder(), host);
-            final JsonNode root = JSON.getMapper().readTree(json);
-            final Map<String, IteratorGroup> groups = 
-                Maps.newHashMapWithExpectedSize(query.getMetrics().size());
-            for (final Metric metric : query.getMetrics()) {
-              groups.put(metric.getId(), new DefaultIteratorGroup(
-                  new SimpleStringGroupId(metric.getId())));
-            }
-            for (final JsonNode node : root) {
-              parseTSQuery(query, node, tracer_span, groups);
-            }
-            final IteratorGroups results = new DefaultIteratorGroups();
-            for (final IteratorGroup group : groups.values()) {
-              results.addGroup(group);
-            }
-            callback(results, 
-                TsdbTrace.successfulTags("remoteHost", host));
-          } catch (IllegalStateException caught) {
-            if (LOG.isDebugEnabled()) {
-              LOG.debug("Callback was already called but we recieved "
-                  + "a result: " + this);
-            }
-          } catch (Exception e) {
-            LOG.error("Failure handling response: " + response + "\nQuery: " 
-                + json, e);
-            if (e instanceof QueryExecutionException) {
-              try {
-                callback(e,
-                    TsdbTrace.exceptionTags(e, "remoteHost", host),
-                    TsdbTrace.exceptionAnnotation(e));
-              } catch (IllegalStateException caught) {
-                // ignore;
-              } catch (Exception ex) {
-                LOG.warn("Unexpected exception when handling exception: " 
-                    + this, e);
-              }
-            } else {
-              try {
-                final Exception ex = new QueryExecutionException(
-                    "Unexepected exception: " + endpoint, 500, query.getOrder(), e);
-                callback(ex,
-                    TsdbTrace.exceptionTags(ex, "remoteHost", host),
-                    TsdbTrace.exceptionAnnotation(ex));
-              } catch (IllegalStateException caught) {
-                // ignore;
-              } catch (Exception ex) {
-                LOG.warn("Unexpected exception when handling exception: " 
-                    + this, e);
-              }
-            }
-          }
-        }
-
-        @Override
-        public void failed(final Exception e) {
-          // TODO possibly retry?
-          if (!completed.get()) {
-            LOG.error("Exception from HttpPost: " + endpoint, e);
-            final Exception ex = new QueryExecutionException(
-                "Unexepected exception: " + endpoint, 500, query.getOrder(), e);
-            try {
-              callback(ex,
-                  TsdbTrace.exceptionTags(ex),
-                  TsdbTrace.exceptionAnnotation(ex));
-            } catch (IllegalStateException caught) {
-              if (LOG.isDebugEnabled()) {
-                LOG.debug("Callback was already called but we recieved "
-                    + "an exception: " + this, e);
-              }
-            } catch (Exception caught) {
-              LOG.error("Unexpected exception calling back failed query", caught);
-            }
-          }
-        }
-      }
-      
-      future = client.execute(post, new ResponseCallback());
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Sent Http query to a TSD: " + this);
-      }
-    }
-    
-    @Override
-    public void cancel() {
-      try {
-        // race condition here.
-        final Exception e = new QueryExecutionCanceled(
-            "Query was cancelled upstream.", 400, query.getOrder());
-        callback(e,
-            TsdbTrace.canceledTags(e));
-      } catch (IllegalStateException caught) {
-        // ignore if already called
-      } catch (Exception e) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Callback may have already been called", e);
-        }
-      }
-      synchronized (this) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Canceling query: " + this);
-        }
-        if (future != null) {
-          try {
-            future.cancel(true);
-          } catch (Exception e) {
-            LOG.error("Failed cancelling future: " + future 
-                + " on execution: " + this, e);
-          } finally {
-            future = null;
-          }
-        }
-      }
-    }
-    
-    /** Helper to remove the future once it's complete but had an exception. */
-    class FutureExceptionRemover implements Callback<Object, Exception> {
-      final Future<HttpResponse> future;
-      public FutureExceptionRemover(final Future<HttpResponse> future) {
-        this.future = future;
-      }
-      @Override
-      public Object call(final Exception e) throws Exception {
-        cleanup();
-        throw e;
-      }
-    }
-    
-    /** Helper to remove the future once it's complete. */
-    class FutureRemover implements Callback<Object, IteratorGroups> {
-      final Future<HttpResponse> future;
-      public FutureRemover(final Future<HttpResponse> future) {
-        this.future = future;
-      }
-      @Override
-      public Object call(final IteratorGroups results) throws Exception {
-        cleanup();
-        return results;
-      }
-    }
-    
-    /** Helper to close the client and remove this from the outstanding executions. */
-    void cleanup() {
-      outstanding_executions.remove(this);
-      try {
-        /** For some reason, closing the async client can take over a second!.
-         * Since we don't really care *when* it's closed, we'll just give it to
-         * a cleanup pool to get rid of.
-         * TODO - this is suboptimal. If we have a threadpool based async client
-         * then we can avoid this alltogether.  */
-        class ClientCloser implements Runnable {
-          @Override
-          public void run() {
-            try {
-              client.close();
-            } catch (IOException e) {
-              LOG.error("Exception while closing the HTTP client", e);
-            }
-          }
-        }
-        context.getTSDB()
-          .getRegistry().cleanupPool().execute(new ClientCloser());
-      } catch (Exception ex) {
-        LOG.error("Exception while scheduling the client for closing.", ex);
-      }
-    }
-  
-    @Override
-    public String toString() {
-      final StringBuilder buf = new StringBuilder()
-          .append("query=")
-          .append(query.toString())
-          .append(", completed=")
-          .append(completed.get())
-          .append(", tracerSpan=")
-          .append(tracer_span)
-          .append(", endpoint=")
-          .append(endpoint)
-          .append(", context=")
-          .append(context)
-          .append(", executor=")
-          .append(HttpQueryV2Executor.this);
-      return buf.toString();
-    }
-  }
-  
+//  class Execution extends QueryExecution<IteratorGroups> {
+//    final QueryContext context;
+//    
+//    /** The client used for communications. */
+//    private final CloseableHttpAsyncClient client;
+//    
+//    /** The Future returned by the client so we can cancel it if we need to. */
+//    private Future<HttpResponse> future;
+//    
+//    /** The endpoint to hit. */
+//    private final String endpoint;
+//    
+//    public Execution(final QueryContext context, 
+//        final TimeSeriesQuery query, final Span upstream_span) {
+//      super(query);
+//      this.context = context;
+//      
+//      // TODO - tune this sucker and share a bit.
+//      client = HttpAsyncClients.custom()
+//          .setDefaultIOReactorConfig(IOReactorConfig.custom()
+//              .setIoThreadCount(1).build())
+//          .setMaxConnTotal(1)
+//          .setMaxConnPerRoute(1)
+//          .build();
+//      client.start();
+//      
+//      deferred.addCallback(new FutureRemover(future))
+//              .addErrback(new FutureExceptionRemover(future));
+//      if (context.getTracer() != null) {
+//        setSpan(context, 
+//            HttpQueryV2Executor.this.getClass().getSimpleName(), 
+//            upstream_span,
+//            TsdbTrace.addTags(
+//                "order", Integer.toString(query.getOrder()),
+//                "query", JSON.serializeToString(query),
+//                "startThread", Thread.currentThread().getName()));
+//      }
+//
+//      final Config override = null; 
+//          //(Config) context.getConfigOverride(node.getId());
+//      if (override != null && !Strings.isNullOrEmpty(override.endpoint)) {
+//        endpoint = override.endpoint + "/api/query";
+//      } else {
+//        endpoint = default_endpoint;
+//      }
+//      if (Strings.isNullOrEmpty(endpoint)) {
+//        throw new IllegalStateException("No endpoint was provided via default "
+//            + "or override for: " + this);
+//      }
+//    }
+//    
+//    @SuppressWarnings("unchecked")
+//    public void execute() {
+//      final String json;
+//      try {
+//      json = JSON.serializeToString(convertQuery(query));
+//        if (LOG.isDebugEnabled()) {
+//          LOG.debug("Sending JSON to http endpoint: " + json);
+//        }
+//      } catch (Exception e) {
+//        try {
+//          final Exception ex = new RejectedExecutionException(
+//              "Failed to convert query", e);
+//          callback(ex, TsdbTrace.exceptionTags(ex));
+//        } catch (IllegalStateException ex) {
+//           LOG.error("Unexpected state halting execution with a failed "
+//               + "conversion: " + this);
+//        } catch (Exception ex) {
+//          LOG.error("Unexpected exception halting execution with a failed "
+//              + "conversion: " + this);
+//        }
+//        return;
+//      }
+//      
+//      final HttpPost post = new HttpPost(endpoint);
+//      final Object session_headers = context.getSessionObject(
+//          SESSION_HEADERS_KEY);
+//      if (session_headers != null) {
+//        try {
+//          for (final Entry<String, String> header :
+//              ((Map<String, String>) session_headers).entrySet()) {
+//            post.setHeader(header.getKey(), header.getValue());
+//          }
+//        } catch (ClassCastException ex) {
+//          final Exception ise = new IllegalStateException(
+//            "Session headers were not a map: " + session_headers.getClass(),
+//            ex);
+//          try {
+//            callback(ise, TsdbTrace.exceptionTags(ise));
+//          } catch (final IllegalStateException ignored) {
+//            LOG.error("Unexpected state halting execution with mistyped "
+//                + "session headers: " + this);
+//          } catch (final Exception ignored) {
+//            LOG.error("Unexpected exception halting execution with mistyped "
+//                + "session headers: " + this);
+//          }
+//          return;
+//        }
+//      }
+//      try {
+//        post.setEntity(new StringEntity(json));
+//      } catch (UnsupportedEncodingException e) {
+//        try {
+//          final Exception ex = new RejectedExecutionException(
+//              "Failed to generate request", e);
+//          callback(ex, TsdbTrace.exceptionTags(ex));
+//        } catch (IllegalStateException ex) {
+//            LOG.error("Unexpected state halting execution with a failed "
+//                + "conversion: " + this);
+//         } catch (Exception ex) {
+//           LOG.error("Unexpected exception halting execution with a failed "
+//               + "conversion: " + this);
+//         }
+//        return;
+//      }
+//      
+//      /** Does the fun bit of parsing the response and calling the deferred. */
+//      class ResponseCallback implements FutureCallback<HttpResponse> {      
+//        @Override
+//        public void cancelled() {
+//          if (LOG.isDebugEnabled()) {
+//            LOG.debug("Http query was canceled: " + this);
+//          }
+//          if (completed.get()) {
+//            return;
+//          }
+//          try {
+//            final Exception e = new QueryExecutionCanceled(
+//                "Query was canceled: " + endpoint, 400, query.getOrder()); 
+//            callback(e,
+//                TsdbTrace.canceledTags(e));
+//          } catch (IllegalStateException e) {
+//            // already called, ignore it.
+//          } catch (Exception e) {
+//            LOG.warn("Exception thrown when calling deferred on cancel: " 
+//                + this, e);
+//          }
+//        }
+//
+//        @Override
+//        public void completed(final HttpResponse response) {
+//          String host = "unknown";
+//          for (final Header header : response.getAllHeaders()) {
+//            if (header.getName().equals("X-Served-By")) {
+//              host = header.getValue();
+//            }
+//          }
+//          if (LOG.isDebugEnabled()) {
+//            LOG.debug("Response from endpoint: " + endpoint + " (" + host 
+//                + ") received");
+//          }
+//          if (completed.get()) {
+//            if (LOG.isDebugEnabled()) {
+//              LOG.debug("Successfully received response [" + response 
+//                  + "] but execution was already marked complete. " + this);
+//            }
+//            try {
+//              EntityUtils.consume(response.getEntity());
+//            } catch (Exception e) {
+//              LOG.error("Unexpected exception consuming response: " + this, e);
+//            }
+//            return;
+//          }
+//          try {
+//            final String json = parseResponse(response, query.getOrder(), host);
+//            final JsonNode root = JSON.getMapper().readTree(json);
+//            final Map<String, IteratorGroup> groups = 
+//                Maps.newHashMapWithExpectedSize(query.getMetrics().size());
+//            for (final Metric metric : query.getMetrics()) {
+//              groups.put(metric.getId(), new DefaultIteratorGroup(
+//                  new SimpleStringGroupId(metric.getId())));
+//            }
+//            for (final JsonNode node : root) {
+//              parseTSQuery(query, node, tracer_span, groups);
+//            }
+//            final IteratorGroups results = new DefaultIteratorGroups();
+//            for (final IteratorGroup group : groups.values()) {
+//              results.addGroup(group);
+//            }
+//            callback(results, 
+//                TsdbTrace.successfulTags("remoteHost", host));
+//          } catch (IllegalStateException caught) {
+//            if (LOG.isDebugEnabled()) {
+//              LOG.debug("Callback was already called but we recieved "
+//                  + "a result: " + this);
+//            }
+//          } catch (Exception e) {
+//            LOG.error("Failure handling response: " + response + "\nQuery: " 
+//                + json, e);
+//            if (e instanceof QueryExecutionException) {
+//              try {
+//                callback(e,
+//                    TsdbTrace.exceptionTags(e, "remoteHost", host),
+//                    TsdbTrace.exceptionAnnotation(e));
+//              } catch (IllegalStateException caught) {
+//                // ignore;
+//              } catch (Exception ex) {
+//                LOG.warn("Unexpected exception when handling exception: " 
+//                    + this, e);
+//              }
+//            } else {
+//              try {
+//                final Exception ex = new QueryExecutionException(
+//                    "Unexepected exception: " + endpoint, 500, query.getOrder(), e);
+//                callback(ex,
+//                    TsdbTrace.exceptionTags(ex, "remoteHost", host),
+//                    TsdbTrace.exceptionAnnotation(ex));
+//              } catch (IllegalStateException caught) {
+//                // ignore;
+//              } catch (Exception ex) {
+//                LOG.warn("Unexpected exception when handling exception: " 
+//                    + this, e);
+//              }
+//            }
+//          }
+//        }
+//
+//        @Override
+//        public void failed(final Exception e) {
+//          // TODO possibly retry?
+//          if (!completed.get()) {
+//            LOG.error("Exception from HttpPost: " + endpoint, e);
+//            final Exception ex = new QueryExecutionException(
+//                "Unexepected exception: " + endpoint, 500, query.getOrder(), e);
+//            try {
+//              callback(ex,
+//                  TsdbTrace.exceptionTags(ex),
+//                  TsdbTrace.exceptionAnnotation(ex));
+//            } catch (IllegalStateException caught) {
+//              if (LOG.isDebugEnabled()) {
+//                LOG.debug("Callback was already called but we recieved "
+//                    + "an exception: " + this, e);
+//              }
+//            } catch (Exception caught) {
+//              LOG.error("Unexpected exception calling back failed query", caught);
+//            }
+//          }
+//        }
+//      }
+//      
+//      future = client.execute(post, new ResponseCallback());
+//      if (LOG.isDebugEnabled()) {
+//        LOG.debug("Sent Http query to a TSD: " + this);
+//      }
+//    }
+//    
+//    @Override
+//    public void cancel() {
+//      try {
+//        // race condition here.
+//        final Exception e = new QueryExecutionCanceled(
+//            "Query was cancelled upstream.", 400, query.getOrder());
+//        callback(e,
+//            TsdbTrace.canceledTags(e));
+//      } catch (IllegalStateException caught) {
+//        // ignore if already called
+//      } catch (Exception e) {
+//        if (LOG.isDebugEnabled()) {
+//          LOG.debug("Callback may have already been called", e);
+//        }
+//      }
+//      synchronized (this) {
+//        if (LOG.isDebugEnabled()) {
+//          LOG.debug("Canceling query: " + this);
+//        }
+//        if (future != null) {
+//          try {
+//            future.cancel(true);
+//          } catch (Exception e) {
+//            LOG.error("Failed cancelling future: " + future 
+//                + " on execution: " + this, e);
+//          } finally {
+//            future = null;
+//          }
+//        }
+//      }
+//    }
+//    
+//    /** Helper to remove the future once it's complete but had an exception. */
+//    class FutureExceptionRemover implements Callback<Object, Exception> {
+//      final Future<HttpResponse> future;
+//      public FutureExceptionRemover(final Future<HttpResponse> future) {
+//        this.future = future;
+//      }
+//      @Override
+//      public Object call(final Exception e) throws Exception {
+//        cleanup();
+//        throw e;
+//      }
+//    }
+//    
+//    /** Helper to remove the future once it's complete. */
+//    class FutureRemover implements Callback<Object, IteratorGroups> {
+//      final Future<HttpResponse> future;
+//      public FutureRemover(final Future<HttpResponse> future) {
+//        this.future = future;
+//      }
+//      @Override
+//      public Object call(final IteratorGroups results) throws Exception {
+//        cleanup();
+//        return results;
+//      }
+//    }
+//    
+//    /** Helper to close the client and remove this from the outstanding executions. */
+//    void cleanup() {
+//      outstanding_executions.remove(this);
+//      try {
+//        /** For some reason, closing the async client can take over a second!.
+//         * Since we don't really care *when* it's closed, we'll just give it to
+//         * a cleanup pool to get rid of.
+//         * TODO - this is suboptimal. If we have a threadpool based async client
+//         * then we can avoid this alltogether.  */
+//        class ClientCloser implements Runnable {
+//          @Override
+//          public void run() {
+//            try {
+//              client.close();
+//            } catch (IOException e) {
+//              LOG.error("Exception while closing the HTTP client", e);
+//            }
+//          }
+//        }
+//        context.getTSDB()
+//          .getRegistry().cleanupPool().execute(new ClientCloser());
+//      } catch (Exception ex) {
+//        LOG.error("Exception while scheduling the client for closing.", ex);
+//      }
+//    }
+//  
+//    @Override
+//    public String toString() {
+//      final StringBuilder buf = new StringBuilder()
+//          .append("query=")
+//          .append(query.toString())
+//          .append(", completed=")
+//          .append(completed.get())
+//          .append(", tracerSpan=")
+//          .append(tracer_span)
+//          .append(", endpoint=")
+//          .append(endpoint)
+//          .append(", context=")
+//          .append(context)
+//          .append(", executor=")
+//          .append(HttpQueryV2Executor.this);
+//      return buf.toString();
+//    }
+//  }
+//  
   /**
    * Converts the time series query into a {@link TSQuery}. Note that since 
    * TSQueries only dealt with metrics and basic aggregation, this method will
    * drop expressions and outputs. Only filters and metrics are passed through.
+   * @param tsdb A non-null TSDB to pull from.
    * @param query The source query.
    * @return A validated time series query.
    * @throws IllegalArgumentException if one or more of the query parameters
    * could not compile properly into a {@link TSQuery}.
    */
-  public static TSQuery convertQuery(final TimeSeriesQuery query) {
+  public static TSQuery convertQuery(final TSDB tsdb, 
+                                     final TimeSeriesQuery query) {
     if (query == null) {
       throw new IllegalArgumentException("Query cannot be null.");
     }
@@ -764,7 +766,7 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
     }
   
     ts_query.setQueries(subs);
-    ts_query.validateAndSetQuery();
+    ts_query.validateAndSetQuery(tsdb);
     return ts_query;
   }
   
@@ -774,7 +776,7 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
   @JsonInclude(Include.NON_NULL)
   @JsonIgnoreProperties(ignoreUnknown = true)
   @JsonDeserialize(builder = Config.Builder.class)
-  public static class Config extends QueryExecutorConfig {
+  public static class Config extends BaseQueryNodeConfig {
     private String endpoint;
     
     /**
@@ -792,12 +794,16 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
     }
     
     @Override
+    public boolean pushDown() {
+      // TODO Auto-generated method stub
+      return false;
+    }
+    
+    @Override
     public String toString() {
       return new StringBuilder()
-          .append("executorId=")
-          .append(executor_id)
-          .append(", executorType=")
-          .append(executor_type)
+          .append("id=")
+          .append(id)
           .append(", endpoint=")
           .append(endpoint)
           .toString();
@@ -817,8 +823,7 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
         return false;
       }
       final Config config = (Config) o;
-      return Objects.equal(executor_id, config.executor_id)
-          && Objects.equal(executor_type, config.executor_type)
+      return Objects.equal(id, config.id)
           && Objects.equal(endpoint, config.endpoint);
     }
 
@@ -830,18 +835,15 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
     @Override
     public HashCode buildHashCode() {
       return Const.HASH_FUNCTION().newHasher()
-          .putString(Strings.nullToEmpty(executor_id), Const.UTF8_CHARSET)
-          .putString(Strings.nullToEmpty(executor_type), Const.UTF8_CHARSET)
+          .putString(Strings.nullToEmpty(id), Const.UTF8_CHARSET)
           .putString(Strings.nullToEmpty(endpoint), Const.UTF8_CHARSET)
           .hash();
     }
 
     @Override
-    public int compareTo(QueryExecutorConfig config) {
+    public int compareTo(QueryNodeConfig config) {
       return ComparisonChain.start()
-          .compare(executor_id, config.executor_id, 
-              Ordering.natural().nullsFirst())
-          .compare(executor_type, config.executor_type, 
+          .compare(id, config.getId(), 
               Ordering.natural().nullsFirst())
           .compare(endpoint, ((Config) config).endpoint, 
               Ordering.natural().nullsFirst())
@@ -849,7 +851,7 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
     }
     
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class Builder extends QueryExecutorConfig.Builder {
+    public static class Builder extends BaseQueryNodeConfig.Builder {
       @JsonProperty
       private String endpoint;
       
@@ -869,5 +871,23 @@ public class HttpQueryV2Executor extends QueryExecutor<IteratorGroups> {
       }
     }
 
+    @Override
+    public String getId() {
+      // TODO Auto-generated method stub
+      return null;
+    }
+
+    @Override
+    public boolean joins() {
+      // TODO Auto-generated method stub
+      return false;
+    }
+
+    @Override
+    public net.opentsdb.query.QueryNodeConfig.Builder toBuilder() {
+      // TODO Auto-generated method stub
+      return null;
+    }
+    
   }
 }

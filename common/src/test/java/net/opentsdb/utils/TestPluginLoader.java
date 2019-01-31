@@ -1,20 +1,23 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2013-2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.utils;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import java.io.FileNotFoundException;
 import java.util.List;
@@ -113,6 +116,27 @@ public final class TestPluginLoader {
   }
   
   @Test
+  public void loadPluginsInterface() throws Exception {
+    List<DummyInterface> plugins = PluginLoader.loadPlugins(
+        DummyInterface.class);
+    assertNotNull(plugins);
+    assertEquals(2, plugins.size());
+    boolean matched_raw = false;
+    boolean matched_abstract = false;
+    for (final DummyInterface plugin : plugins) {
+      if (plugin instanceof DummyInterfaceImp) {
+        matched_raw = true;
+      } else if (plugin instanceof DummyExtendedInterfaceImp) {
+        matched_abstract = true;
+      } else {
+        throw new AssertionError("Unexpected class type: " + plugin.getClass());
+      }
+    }
+    assertTrue(matched_raw);
+    assertTrue(matched_abstract);
+  }
+  
+  @Test
   public void loadPluginsNotFound() throws Exception {
     List<DummyPluginBad> plugins = PluginLoader.loadPlugins(
         DummyPluginBad.class);
@@ -127,5 +151,44 @@ public final class TestPluginLoader {
     }
     
     public abstract String mustImplement();
+  }
+
+  /** A test interface for plugin loading. */
+  public static interface DummyInterface {
+    public void hello();
+  }
+  
+  /** Top-level implementations are fine (or statics in a nest)... */
+  public static class DummyInterfaceImp implements DummyInterface {
+    @Override
+    public void hello() { }
+  }
+  
+  /** ... but child classes won't be loaded since they need the parent
+   * in their ctor. */
+  public class DummyBadImp implements DummyInterface {
+    @Override
+    public void hello() { }
+  }
+  
+  /** Likewise, we can have an abstract in a plugin... */
+  public static abstract class DummyExtendedInterface 
+    implements DummyInterface {
+  }
+  
+  /** ... and if it's a static or top-level, all good! */
+  public static class DummyExtendedInterfaceImp 
+    extends DummyExtendedInterface {
+    @Override
+    public void hello() { }
+  }
+  
+  /** But children are bad! */
+  public abstract class DummyBadInterface extends DummyExtendedInterface {
+  }
+  
+  public class DummyBadInterfaceImp extends DummyBadInterface {
+    @Override
+    public void hello() { }
   }
 }

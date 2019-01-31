@@ -1,19 +1,22 @@
 // This file is part of OpenTSDB.
-// Copyright (C) 2010-2017  The OpenTSDB Authors.
+// Copyright (C) 2010-2018  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.utils;
 
 import java.nio.charset.Charset;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -23,6 +26,7 @@ import java.util.Map.Entry;
 
 import javax.xml.bind.DatatypeConverter;
 
+import com.google.common.collect.Lists;
 import com.google.common.hash.Funnel;
 import com.google.common.hash.PrimitiveSink;
 
@@ -334,6 +338,16 @@ public final class Bytes {
     return DatatypeConverter.parseHexBinary(hex);
   }
   
+  /**
+   * Determines if the array is null or has a length of 0. The array may
+   * be full of zero's though and return false.
+   * @param array An array to test for null or a length of 0.
+   * @return True if the array was null or had a length of 0.
+   */
+  public static boolean isNullOrEmpty(final byte[] array) {
+    return (array == null || array.length < 1);
+  }
+  
   // ---------------------------- //
   // Pretty-printing byte arrays. //
   // ---------------------------- //
@@ -421,6 +435,69 @@ public final class Bytes {
     return buf.toString();
   }
 
+  /**
+   * Pretty-prints a byte array into a human-readable string, optionally
+   * in hex.
+   * @param array The (possibly {@code null}) array to pretty-print.
+   * @param force_hex Whether or not to encode in hex.
+   * @return The array in a pretty-printed string.
+   */
+  public static String pretty(final byte[] array, final boolean force_hex) {
+    if (array == null) {
+      return "null";
+    }
+    final StringBuilder buf = new StringBuilder(1 + array.length + 1);
+    pretty(buf, array, force_hex);
+    return buf.toString();
+  }
+  
+  /**
+   * Encodes the data in the buffer as escaped hex.
+   * @param buf The non-null buffer to populate.
+   * @param array The array to print.
+   * @param force_hex Whether or not to force to hex.
+   */
+  public static void pretty(final StringBuilder buf, 
+                            final byte[] array, 
+                            final boolean force_hex) {
+    if (array == null) {
+      buf.append("null");
+      return;
+    }
+    int ascii = 0;
+    final int start_length = buf.length();
+    final int n = array.length;
+    buf.ensureCapacity(start_length + 1 + n + 1);
+    buf.append('"');
+    for (int i = 0; i < n; i++) {
+      final byte b = array[i];
+      if (force_hex) {
+        buf.append("\\x")
+              .append((char) HEX[(b >>> 4) & 0x0F])
+              .append((char) HEX[b & 0x0F]);
+      } else {
+        if (' ' <= b && b <= '~') {
+          ascii++;
+          buf.append((char) b);
+        } else if (b == '\n') {
+          buf.append('\\').append('n');
+        } else if (b == '\t') {
+          buf.append('\\').append('t');
+        } else {
+          buf.append("\\x")
+            .append((char) HEX[(b >>> 4) & 0x0F])
+            .append((char) HEX[b & 0x0F]);
+        }
+      }
+    }
+    if (!force_hex && ascii < n / 2) {
+      buf.setLength(start_length);
+      buf.append(Arrays.toString(array));
+    } else {
+      buf.append('"');
+    }
+  }
+  
   // This doesn't really belong here but it doesn't belong anywhere else
   // either, so let's put it close to the other pretty-printing functions.
   /**
@@ -467,6 +544,24 @@ public final class Bytes {
 
   }
 
+  /**
+   * A singleton {@link Comparator} for optionally {@code null} byte arrays.
+   * @see #memcmpMaybeNull
+   */
+  public static final MemCmpNulls MEMCMPNULLS = new MemCmpNulls();
+  
+  /** {@link Comparator} for optionally {@code null} byte arrays.  */
+  private final static class MemCmpNulls implements Comparator<byte[]> {
+    private MemCmpNulls() {  // Can't instantiate outside of this class.
+    }
+    
+    @Override
+    public int compare(final byte[] a, final byte[] b) {
+      return memcmpMaybeNull(a, b);
+    }
+    
+  }
+  
   /**
    * {@code memcmp} in Java, hooray.
    * @param a First non-{@code null} byte array to compare.
@@ -617,8 +712,26 @@ public final class Bytes {
   public static final class ByteMap<V> extends TreeMap<byte[], V>
     implements Iterable<Map.Entry<byte[], V>> {
 
+    /**
+     * Default ctor.
+     */
     public ByteMap() {
       super(MEMCMP);
+    }
+    
+    /**
+     * Copy constructor. NOTE: Copies references, not the values of the
+     * byte arrays. So if an underlying array changes it's values, then
+     * the copy will be mutated as well.
+     * @param other Another non-null object to copy from.
+     */
+    public ByteMap(final Iterable<Entry<byte[], V>> other) {
+      super(MEMCMP);
+      final Iterator<Entry<byte[], V>> iterator = other.iterator();
+      while (iterator.hasNext()) {
+        final Entry<byte[], V> entry = iterator.next();
+        put(entry.getKey(), entry.getValue());
+      }
     }
 
     /** Returns an iterator that goes through all the entries in this map.  */
@@ -731,6 +844,55 @@ public final class Bytes {
   }
   
   /**
+   * A singleton {@link Comparator} for List&lt;byte[]&gt; lists. Support nulls.
+   */
+  public static final ByteListComparator BYTE_LIST_CMP = new ByteListComparator();
+  
+  /** {@link Comparator} for List&lt;byte[]&gt;s .Support nulls. 
+   * <b>NOTE:</b> Super inefficient as it makes copies of the arrays, 
+   * sorts them then compares, accounting for dupes. */
+  public static class ByteListComparator implements Comparator<List<byte[]>> {
+    private ByteListComparator() { }
+
+    @Override
+    public int compare(final List<byte[]> a, final List<byte[]> b) {
+      if (a == b || a == null && b == null) {
+        return 0;
+      }
+      if (a == null && b != null) {
+        return -1;
+      }
+      if (b == null && a != null) {
+        return 1;
+      }
+      if (a == b) {
+        return 0;
+      }
+      if (a.size() > b.size()) {
+        return -1;
+      }
+      if (b.size() > a.size()) {
+        return 1;
+      }
+      
+      // TODO - MUST be a better way than this
+      final List<byte[]> a_clone = Lists.newArrayList(a);
+      final List<byte[]> b_clone = Lists.newArrayList(b);
+      Collections.sort(a_clone, MEMCMPNULLS);
+      Collections.sort(b_clone, MEMCMPNULLS);
+      int cmp = 0;
+      for (int i = 0; i < a_clone.size(); i++) {
+        cmp = memcmpMaybeNull(a_clone.get(i), b_clone.get(i));
+        if (cmp != 0) {
+          return cmp;
+        }
+      }
+      return 0;
+    }
+    
+  }
+  
+  /**
    * Helper to print out a list of byte arrays with specific decoding or 
    * using the {@link #pretty(byte[])} method.
    * @param list A list that may be null, empty or full of byte arrays.
@@ -836,6 +998,11 @@ public final class Bytes {
     /** @return The key. */
     public byte[] key() {
       return key;
+    }
+  
+    @Override
+    public String toString() {
+      return Bytes.pretty(key);
     }
   }
 }

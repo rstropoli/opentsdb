@@ -1,15 +1,17 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.query.execution;
 
 import java.lang.reflect.Constructor;
@@ -18,8 +20,8 @@ import com.google.common.base.Strings;
 import com.google.common.reflect.TypeToken;
 import com.stumbleupon.async.Deferred;
 
+import net.opentsdb.core.DefaultRegistry;
 import net.opentsdb.core.TSDB;
-import net.opentsdb.query.execution.graph.ExecutionGraphNode;
 
 /**
  * Simple {@link QueryExecutorFactory} that takes the ctor and config.
@@ -67,11 +69,11 @@ public class DefaultQueryExecutorFactory<T> extends QueryExecutorFactory<T> {
       throw new IllegalArgumentException("Constructor can only have one type: " 
           + ctor.getParameterCount());
     }
-    if (ctor.getGenericParameterTypes()[0] != ExecutionGraphNode.class) {
-      throw new IllegalArgumentException("First constructor parameter must be "
-          + "a ExecutionGraphNode: " + 
-          ctor.getGenericParameterTypes()[0].getTypeName());
-    }
+//    if (ctor.getGenericParameterTypes()[0] != ExecutionGraphNode.class) {
+//      throw new IllegalArgumentException("First constructor parameter must be "
+//          + "a ExecutionGraphNode: " + 
+//          ctor.getGenericParameterTypes()[0].getTypeName());
+//    }
     if (Strings.isNullOrEmpty(id)) {
       throw new IllegalArgumentException("ID cannot be null.");
     }
@@ -81,10 +83,10 @@ public class DefaultQueryExecutorFactory<T> extends QueryExecutorFactory<T> {
   }
   
   @Override
-  public Deferred<Object> initialize(final TSDB tsdb) {
+  public Deferred<Object> initialize(final TSDB tsdb, final String id) {
     try {
       if (!Strings.isNullOrEmpty(id)) {
-        tsdb.getRegistry().registerFactory(this);
+        ((DefaultRegistry) tsdb.getRegistry()).registerFactory(this);
       }
     } catch (Exception e) {
       return Deferred.fromError(e);
@@ -98,12 +100,12 @@ public class DefaultQueryExecutorFactory<T> extends QueryExecutorFactory<T> {
   }
   
   /** @return The ID of the executor instantiated by this factory. */
-  public String id() {
+  public String type() {
     return id;
   }
   
   /** @return The type of executor instantiated. */
-  public TypeToken<?> type() {
+  public TypeToken<?> executorType() {
     return type;
   }
   
@@ -117,19 +119,25 @@ public class DefaultQueryExecutorFactory<T> extends QueryExecutorFactory<T> {
    * @throws IllegalStateException if the instantiation failed.
    */
   @SuppressWarnings("unchecked")
-  public QueryExecutor<T> newExecutor(final ExecutionGraphNode node) {
-    if (node == null) {
-      throw new IllegalArgumentException("Node cannot be null.");
-    }
-    if (Strings.isNullOrEmpty(node.getExecutorId())) {
-      throw new IllegalArgumentException("Node ID cannot be null.");
-    }
-    try {
-      return (QueryExecutor<T>) ctor.newInstance(node);
-    } catch (Exception e) {
-      throw new IllegalStateException("Failed to instaniate executor for: " 
-          + ctor, e);
-    }
+  public QueryExecutor<T> newExecutor() {
+//    if (node == null) {
+//      throw new IllegalArgumentException("Node cannot be null.");
+//    }
+//    if (Strings.isNullOrEmpty(node.getId())) {
+//      throw new IllegalArgumentException("Node ID cannot be null.");
+//    }
+//    try {
+//      return (QueryExecutor<T>) ctor.newInstance(node);
+//    } catch (Exception e) {
+//      throw new IllegalStateException("Failed to instaniate executor for: " 
+//          + ctor, e);
+//    }
+    return null;
+  }
+
+  @Override
+  public String id() {
+    return id;
   }
 
 }

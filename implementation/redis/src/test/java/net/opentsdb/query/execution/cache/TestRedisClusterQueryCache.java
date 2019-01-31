@@ -1,15 +1,17 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.query.execution.cache;
 
 import static org.junit.Assert.assertArrayEquals;
@@ -28,6 +30,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -41,12 +44,14 @@ import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
 
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.stumbleupon.async.Deferred;
 
-import net.opentsdb.core.Registry;
+import net.opentsdb.configuration.Configuration;
+import net.opentsdb.configuration.UnitTestConfiguration;
+import net.opentsdb.core.DefaultRegistry;
 import net.opentsdb.core.TSDB;
-import net.opentsdb.query.context.QueryContext;
-import net.opentsdb.query.execution.QueryExecution;
-import net.opentsdb.utils.Config;
+import net.opentsdb.stats.BlackholeStatsCollector;
 import redis.clients.jedis.HostAndPort;
 import redis.clients.jedis.JedisCluster;
 
@@ -54,25 +59,26 @@ import redis.clients.jedis.JedisCluster;
 @PrepareForTest({ TSDB.class, RedisClusterQueryCache.class })
 public class TestRedisClusterQueryCache {
   private TSDB tsdb;
-  private Registry registry;
-  private Config config;
+  private DefaultRegistry registry;
+  private Map<String, String> config_map;
+  private Configuration config;
   private JedisCluster cluster;
   private Set<HostAndPort> nodes;
-  private QueryContext context;
   
   @Before
   public void before() throws Exception {
     tsdb = mock(TSDB.class);
-    registry = mock(Registry.class);
-    config = new Config(false);
+    registry = mock(DefaultRegistry.class);
     cluster = mock(JedisCluster.class);
-    context = mock(QueryContext.class);
     
-    config.overrideConfig("redis.query.cache.hosts", 
+    config_map = Maps.newHashMap();
+    config_map.put("redis.query.cache.hosts", 
         "localhost:2424,localhost:4242");
+    config = UnitTestConfiguration.getConfiguration(config_map);
     
     when(tsdb.getConfig()).thenReturn(config);
     when(tsdb.getRegistry()).thenReturn(registry);
+    when(tsdb.getStatsCollector()).thenReturn(new BlackholeStatsCollector());
     
     PowerMockito.whenNew(JedisCluster.class).withAnyArguments()
       .thenAnswer(new Answer<JedisCluster>() {
@@ -95,7 +101,7 @@ public class TestRedisClusterQueryCache {
   @Test
   public void initialize() throws Exception {
     final RedisClusterQueryCache cache = new RedisClusterQueryCache();
-    assertNull(cache.initialize(tsdb).join(1));
+    assertNull(cache.initialize(tsdb, null).join(1));
     PowerMockito.verifyNew(JedisCluster.class, times(1)).withArguments(anySet());
     verify(cluster, never()).close();
     assertEquals(2, nodes.size());
@@ -108,9 +114,9 @@ public class TestRedisClusterQueryCache {
   
   @Test
   public void initializeShared() throws Exception {
-    config.overrideConfig("redis.query.cache.shared_object", "RedisCache");
+    config_map.put("redis.query.cache.shared_object", "RedisCache");
     final RedisClusterQueryCache cache = new RedisClusterQueryCache();
-    assertNull(cache.initialize(tsdb).join(1));
+    assertNull(cache.initialize(tsdb, null).join(1));
     PowerMockito.verifyNew(JedisCluster.class, times(1)).withArguments(anySet());
     verify(cluster, never()).close();
     assertEquals(2, nodes.size());
@@ -123,11 +129,11 @@ public class TestRedisClusterQueryCache {
   
   @Test
   public void initializeSharedAlreadyThere() throws Exception {
-    config.overrideConfig("redis.query.cache.shared_object", "RedisCache");
+    config_map.put("redis.query.cache.shared_object", "RedisCache");
     when(registry.getSharedObject("RedisCache")).thenReturn(cluster);
     
     final RedisClusterQueryCache cache = new RedisClusterQueryCache();
-    assertNull(cache.initialize(tsdb).join(1));
+    assertNull(cache.initialize(tsdb, null).join(1));
     PowerMockito.verifyNew(JedisCluster.class, never()).withArguments(anySet());
     verify(cluster, never()).close();
     assertNull(nodes);
@@ -136,22 +142,22 @@ public class TestRedisClusterQueryCache {
   
   @Test (expected = IllegalArgumentException.class)
   public void initializeSharedWrongType() throws Exception {
-    config.overrideConfig("redis.query.cache.shared_object", "RedisCache");
+    config_map.put("redis.query.cache.shared_object", "RedisCache");
     when(registry.getSharedObject("RedisCache")).thenReturn(tsdb);
     
     final RedisClusterQueryCache cache = new RedisClusterQueryCache();
-    cache.initialize(tsdb).join(1);
+    cache.initialize(tsdb, null).join(1);
   }
   
   @Test
   public void initializeSharedRace() throws Exception {
-    config.overrideConfig("redis.query.cache.shared_object", "RedisCache");
+    config_map.put("redis.query.cache.shared_object", "RedisCache");
     final JedisCluster extant = mock(JedisCluster.class);
     when(registry.registerSharedObject("RedisCache", cluster))
       .thenReturn(extant);
     
     final RedisClusterQueryCache cache = new RedisClusterQueryCache();
-    assertNull(cache.initialize(tsdb).join(1));
+    assertNull(cache.initialize(tsdb, null).join(1));
     PowerMockito.verifyNew(JedisCluster.class, times(1)).withArguments(anySet());
     verify(cluster, times(1)).close();
     assertEquals(2, nodes.size());
@@ -165,27 +171,26 @@ public class TestRedisClusterQueryCache {
   
   @Test (expected = IllegalArgumentException.class)
   public void initializeNullHosts() throws Exception {
-    config.overrideConfig("redis.query.cache.hosts", null);
-    new RedisClusterQueryCache().initialize(tsdb).join(1);
+    config_map.put("redis.query.cache.hosts", null);
+    new RedisClusterQueryCache().initialize(tsdb, null).join(1);
   }
   
   @Test (expected = IllegalArgumentException.class)
   public void initializeEmptyHost() throws Exception {
-    config.overrideConfig("redis.query.cache.hosts", "");
-    new RedisClusterQueryCache().initialize(tsdb).join(1);
+    config_map.put("redis.query.cache.hosts", "");
+    new RedisClusterQueryCache().initialize(tsdb, null).join(1);
   }
   
   @Test (expected = IllegalArgumentException.class)
   public void initializeBadHostPort() throws Exception {
-    config.overrideConfig("redis.query.cache.hosts", "localhost:notanum");
-    new RedisClusterQueryCache().initialize(tsdb).join(1);
+    config_map.put("redis.query.cache.hosts", "localhost:notanum");
+    new RedisClusterQueryCache().initialize(tsdb, null).join(1);
   }
-  
   
   @Test
   public void shutdown() throws Exception {
     final RedisClusterQueryCache cache = new RedisClusterQueryCache();
-    assertNull(cache.initialize(tsdb).join(1));
+    assertNull(cache.initialize(tsdb, null).join(1));
     assertNull(cache.shutdown().join(1));
     PowerMockito.verifyNew(JedisCluster.class, times(1)).withArguments(anySet());
     verify(cluster, times(1)).close();
@@ -199,40 +204,40 @@ public class TestRedisClusterQueryCache {
     RedisClusterQueryCache cache = new RedisClusterQueryCache();
     
     try {
-      cache.cache(key, data, 600000, TimeUnit.MILLISECONDS);
+      cache.cache(key, data, 600000, TimeUnit.MILLISECONDS, null);
       fail("Expected IllegalStateException");
     } catch (IllegalStateException e) { }
     
-    assertNull(cache.initialize(tsdb).join(1));
+    assertNull(cache.initialize(tsdb, null).join(1));
 
-    cache.cache(key, data, 600000, TimeUnit.MILLISECONDS);
+    cache.cache(key, data, 600000, TimeUnit.MILLISECONDS, null);
     verify(cluster, times(1)).set(key, data, RedisClusterQueryCache.NX, 
         RedisClusterQueryCache.EXP, 600000L);
     verify(cluster, never()).close();
     
     try {
-      cache.cache(null, data, 600000, TimeUnit.MILLISECONDS);
+      cache.cache(null, data, 600000, TimeUnit.MILLISECONDS, null);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     try {
-      cache.cache(new byte[] { }, data, 600000, TimeUnit.MILLISECONDS);
+      cache.cache(new byte[] { }, data, 600000, TimeUnit.MILLISECONDS, null);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
-    cache.cache(key, data, 0, TimeUnit.MILLISECONDS);
+    cache.cache(key, data, 0, TimeUnit.MILLISECONDS, null);
     verify(cluster, times(1)).set(key, data, RedisClusterQueryCache.NX, 
         RedisClusterQueryCache.EXP, 600000L);
     verify(cluster, never()).close();
     
     try {
-      cache.cache(key, data, 600000, TimeUnit.NANOSECONDS);
+      cache.cache(key, data, 600000, TimeUnit.NANOSECONDS, null);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     when(cluster.set(key, data, RedisClusterQueryCache.NX, RedisClusterQueryCache.EXP, 
         600000L)).thenThrow(new IllegalArgumentException("Boo!"));
-    cache.cache(key, data, 600000, TimeUnit.MILLISECONDS);
+    cache.cache(key, data, 600000, TimeUnit.MILLISECONDS, null);
     verify(cluster, times(2)).set(key, data, RedisClusterQueryCache.NX, 
         RedisClusterQueryCache.EXP, 600000L);
     verify(cluster, never()).close();
@@ -247,13 +252,13 @@ public class TestRedisClusterQueryCache {
     RedisClusterQueryCache cache = new RedisClusterQueryCache();
     
     try {
-      cache.cache(keys, data, expirations, TimeUnit.MILLISECONDS);
+      cache.cache(keys, data, expirations, TimeUnit.MILLISECONDS, null);
       fail("Expected IllegalStateException");
     } catch (IllegalStateException e) { }
     
-    assertNull(cache.initialize(tsdb).join(1));
+    assertNull(cache.initialize(tsdb, null).join(1));
 
-    cache.cache(keys, data, expirations, TimeUnit.MILLISECONDS);
+    cache.cache(keys, data, expirations, TimeUnit.MILLISECONDS, null);
     verify(cluster, times(1)).set(new byte[] { 0, 0, 1 }, new byte[] { 42 }, 
         RedisClusterQueryCache.NX, RedisClusterQueryCache.EXP, 600000L);
     verify(cluster, times(1)).set(new byte[] { 0, 0, 2 }, new byte[] { 24 }, 
@@ -261,16 +266,16 @@ public class TestRedisClusterQueryCache {
     verify(cluster, never()).close();
     
     try {
-      cache.cache(null, data, expirations, TimeUnit.MILLISECONDS);
+      cache.cache(null, data, expirations, TimeUnit.MILLISECONDS, null);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     try {
-      cache.cache(new byte[][] { }, data, expirations, TimeUnit.MILLISECONDS);
+      cache.cache(new byte[][] { }, data, expirations, TimeUnit.MILLISECONDS, null);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
-    cache.cache(keys, data, new long[] { 600000, 0 }, TimeUnit.MILLISECONDS);
+    cache.cache(keys, data, new long[] { 600000, 0 }, TimeUnit.MILLISECONDS, null);
     verify(cluster, times(2)).set(new byte[] { 0, 0, 1 }, new byte[] { 42 }, 
         RedisClusterQueryCache.NX, RedisClusterQueryCache.EXP, 600000L);
     verify(cluster, times(1)).set(new byte[] { 0, 0, 2 }, new byte[] { 24 }, 
@@ -280,24 +285,24 @@ public class TestRedisClusterQueryCache {
     verify(cluster, never()).close();
     
     try {
-      cache.cache(keys, data, expirations, TimeUnit.NANOSECONDS);
+      cache.cache(keys, data, expirations, TimeUnit.NANOSECONDS, null);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     try {
-      cache.cache(keys, data, null, TimeUnit.MILLISECONDS);
+      cache.cache(keys, data, null, TimeUnit.MILLISECONDS, null);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     try {
-      cache.cache(keys, data, new long[] { 30000L }, TimeUnit.MILLISECONDS);
+      cache.cache(keys, data, new long[] { 30000L }, TimeUnit.MILLISECONDS, null);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     when(cluster.set(new byte[] { 0, 0, 1 }, new byte[] { 42 }, 
         RedisClusterQueryCache.NX, RedisClusterQueryCache.EXP, 600000L))
         .thenThrow(new IllegalArgumentException("Boo!"));
-    cache.cache(keys, data, expirations, TimeUnit.MILLISECONDS);
+    cache.cache(keys, data, expirations, TimeUnit.MILLISECONDS, null);
     verify(cluster, times(3)).set(new byte[] { 0, 0, 1 }, new byte[] { 42 }, 
         RedisClusterQueryCache.NX, RedisClusterQueryCache.EXP, 600000L);
     // not called
@@ -312,37 +317,37 @@ public class TestRedisClusterQueryCache {
     byte[] data = new byte[] { 42 };
     
     RedisClusterQueryCache cache = new RedisClusterQueryCache();
-    QueryExecution<byte[]> exec = cache.fetch(context, key, null);
+    Deferred<byte[]> exec = cache.fetch(key, null);
     
     try {
-      exec.deferred().join(1);
+      exec.join(1);
       fail("Expected IllegalStateException");
     } catch (IllegalStateException e) { }
     
-    cache.initialize(tsdb).join(1);
+    cache.initialize(tsdb, null).join(1);
     
-    exec = cache.fetch(context, key, null);
-    assertNull(exec.deferred().join(1));
+    exec = cache.fetch(key, null);
+    assertNull(exec.join(1));
     
     when(cluster.get(key)).thenReturn(data);
-    exec = cache.fetch(context, key, null);
-    assertArrayEquals(data, exec.deferred().join(1));
+    exec = cache.fetch(key, null);
+    assertArrayEquals(data, exec.join(1));
     
-    exec = cache.fetch(context, (byte[]) null, null);
+    exec = cache.fetch((byte[]) null, null);
     try {
-      exec.deferred().join(1);
+      exec.join(1);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
-    exec = cache.fetch(context, new byte[] { }, null);
+    exec = cache.fetch(new byte[] { }, null);
     try {
-      exec.deferred().join(1);
+      exec.join(1);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     when(cluster.get(key)).thenThrow(new IllegalStateException("Boo!"));
-    exec = cache.fetch(context, key, null);
-    assertNull(exec.deferred().join(1));
+    exec = cache.fetch(key, null);
+    assertNull(exec.join(1));
   }
   
   @Test
@@ -352,52 +357,52 @@ public class TestRedisClusterQueryCache {
     byte[] data_b = new byte[] { 24 };
     
     RedisClusterQueryCache cache = new RedisClusterQueryCache();
-    QueryExecution<byte[][]> exec = cache.fetch(context, keys, null);
+    Deferred<byte[][]> exec = cache.fetch(keys, null);
     
     try {
-      exec.deferred().join(1);
+      exec.join(1);
       fail("Expected IllegalStateException");
     } catch (IllegalStateException e) { }
     
-    cache.initialize(tsdb).join(1);
+    cache.initialize(tsdb, null).join(1);
     
-    exec = cache.fetch(context, keys, null);
-    byte[][] response = exec.deferred().join(1);
+    exec = cache.fetch(keys, null);
+    byte[][] response = exec.join(1);
     assertEquals(2, response.length);
     assertNull(response[0]);
     assertNull(response[1]);
     
     List<byte[]> cached = Lists.newArrayList(data_a, data_b);
     when(cluster.mget(keys)).thenReturn(cached);
-    exec = cache.fetch(context, keys, null);
-    response = exec.deferred().join(1);
+    exec = cache.fetch(keys, null);
+    response = exec.join(1);
     assertEquals(2, response.length);
     assertArrayEquals(data_a, response[0]);
     assertArrayEquals(data_b, response[1]);
     
     cached = Lists.newArrayList(null, data_b);
     when(cluster.mget(keys)).thenReturn(cached);
-    exec = cache.fetch(context, keys, null);
-    response = exec.deferred().join(1);
+    exec = cache.fetch(keys, null);
+    response = exec.join(1);
     assertEquals(2, response.length);
     assertNull(response[0]);
     assertArrayEquals(data_b, response[1]);
     
-    exec = cache.fetch(context, (byte[][]) null, null);
+    exec = cache.fetch((byte[][]) null, null);
     try {
-      exec.deferred().join(1);
+      exec.join(1);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
-    exec = cache.fetch(context, new byte[][] { }, null);
+    exec = cache.fetch(new byte[][] { }, null);
     try {
-      exec.deferred().join(1);
+      exec.join(1);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     when(cluster.mget(keys)).thenThrow(new IllegalStateException("Boo!"));
-    exec = cache.fetch(context, keys, null);
-    response = exec.deferred().join(1);
+    exec = cache.fetch(keys, null);
+    response = exec.join(1);
     assertEquals(2, response.length);
     assertNull(response[0]);
     assertNull(response[1]);

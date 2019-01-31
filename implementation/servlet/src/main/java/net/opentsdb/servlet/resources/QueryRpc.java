@@ -1,19 +1,21 @@
 // This file is part of OpenTSDB.
-// Copyright (C) 2013-2017 The OpenTSDB Authors.
+// Copyright (C) 2013-2018 The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.servlet.resources;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Enumeration;
@@ -24,8 +26,11 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.servlet.AsyncContext;
+import javax.servlet.AsyncEvent;
+import javax.servlet.AsyncListener;
 import javax.servlet.ServletConfig;
 import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
@@ -35,40 +40,42 @@ import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import javax.ws.rs.core.StreamingOutput;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.fasterxml.jackson.core.JsonGenerator;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
 import com.google.common.collect.Sets;
-import com.stumbleupon.async.Callback;
 
-import io.opentracing.Span;
 import jersey.repackaged.com.google.common.collect.ImmutableMap;
+import jersey.repackaged.com.google.common.collect.Lists;
+import net.opentsdb.auth.AuthState;
+import net.opentsdb.auth.Authentication;
+import net.opentsdb.auth.AuthState.AuthStatus;
 import net.opentsdb.core.TSDB;
 import net.opentsdb.core.Tags;
-import net.opentsdb.core.TsdbPlugin;
-import net.opentsdb.data.iterators.IteratorGroups;
 import net.opentsdb.exceptions.QueryExecutionException;
 import net.opentsdb.query.TSQuery;
 import net.opentsdb.query.TSSubQuery;
-import net.opentsdb.query.context.DefaultQueryContext;
-import net.opentsdb.query.context.QueryContext;
-import net.opentsdb.query.execution.HttpQueryV2Executor;
-import net.opentsdb.query.execution.QueryExecution;
-import net.opentsdb.query.execution.QueryExecutor;
-import net.opentsdb.query.execution.serdes.JsonV2QuerySerdes;
+import net.opentsdb.query.QueryContext;
+import net.opentsdb.query.QueryMode;
+import net.opentsdb.query.SemanticQuery;
+import net.opentsdb.query.SemanticQueryContext;
 import net.opentsdb.query.execution.serdes.JsonV2QuerySerdesOptions;
-import net.opentsdb.query.filter.TagVFilter;
 import net.opentsdb.query.pojo.RateOptions;
+import net.opentsdb.query.pojo.TagVFilter;
 import net.opentsdb.query.pojo.TimeSeriesQuery;
+import net.opentsdb.query.serdes.SerdesOptions;
 import net.opentsdb.servlet.applications.OpenTSDBApplication;
-import net.opentsdb.stats.StatsCollector;
-import net.opentsdb.stats.TsdbTrace;
-import net.opentsdb.stats.TsdbTracer;
+import net.opentsdb.servlet.exceptions.GenericExceptionMapper;
+import net.opentsdb.servlet.filter.AuthFilter;
+import net.opentsdb.servlet.sinks.ServletSinkConfig;
+import net.opentsdb.servlet.sinks.ServletSinkFactory;
+import net.opentsdb.stats.DefaultQueryStats;
+import net.opentsdb.stats.Span;
+import net.opentsdb.stats.Trace;
+import net.opentsdb.stats.Tracer;
 import net.opentsdb.utils.Bytes;
 import net.opentsdb.utils.JSON;
 import net.opentsdb.utils.StringUtils;
@@ -82,7 +89,7 @@ import net.opentsdb.utils.StringUtils;
  * 
  * @since 2.0
  */
-@Path("api/query")
+@Path("query")
 final public class QueryRpc {
   private static final Logger LOG = LoggerFactory.getLogger(QueryRpc.class);
   private static final Logger QUERY_LOG = LoggerFactory.getLogger("QueryLog");
@@ -115,15 +122,17 @@ final public class QueryRpc {
   @Produces(MediaType.APPLICATION_JSON)
   @Consumes(MediaType.APPLICATION_JSON)
   public Response post(final @Context ServletConfig servlet_config, 
-                       final @Context HttpServletRequest request) throws Exception {
-    if (request.getAttribute(OpenTSDBApplication.QUERY_EXCEPTION_ATTRIBUTE) != null) {
-      return handleException(request);
-    } else if (request.getAttribute(
-        OpenTSDBApplication.QUERY_RESULT_ATTRIBUTE) != null) {
-      return handeResponse(servlet_config, request);
-    } else {
-      return handleQuery(servlet_config, request, false);
+                       final @Context HttpServletRequest request/*,
+                       final @Context HttpServletResponse response*/) throws Exception {
+    final Object stream = request.getAttribute("DATA");
+    if (stream != null) {
+      return Response.ok()
+          .entity(((ByteArrayOutputStream) stream).toByteArray())
+          .header("Content-Type", "application/json")
+          .build();
     }
+    
+    return handleQuery(servlet_config, request, false);
   }
   
   /**
@@ -137,15 +146,17 @@ final public class QueryRpc {
   @GET
   @Produces(MediaType.APPLICATION_JSON)
   public Response get(final @Context ServletConfig servlet_config, 
-                      final @Context HttpServletRequest request) throws Exception {
-    if (request.getAttribute(OpenTSDBApplication.QUERY_EXCEPTION_ATTRIBUTE) != null) {
-      return handleException(request);
-    } else if (request.getAttribute(
-        OpenTSDBApplication.QUERY_RESULT_ATTRIBUTE) != null) {
-      return handeResponse(servlet_config, request);
-    } else {
-      return handleQuery(servlet_config, request, true);
+                      final @Context HttpServletRequest request/*,
+                      final @Context HttpServletResponse response*/) throws Exception {
+    final Object stream = request.getAttribute("DATA");
+    if (stream != null) {
+      return Response.ok()
+          .entity(((ByteArrayOutputStream) stream).toByteArray())
+          .header("Content-Type", "application/json")
+          .build();
     }
+    
+    return handleQuery(servlet_config, request, true);
   }
   
   /**
@@ -157,12 +168,10 @@ final public class QueryRpc {
    * @return Always null.
    * @throws Exception if something went pear shaped.
    */
-  @SuppressWarnings({ "unchecked" })
   @VisibleForTesting
   Response handleQuery(final ServletConfig servlet_config, 
                        final HttpServletRequest request,
                        final boolean is_get) throws Exception {
-    
     Object obj = servlet_config.getServletContext()
         .getAttribute(OpenTSDBApplication.TSD_ATTRIBUTE);
     if (obj == null) {
@@ -176,31 +185,44 @@ final public class QueryRpc {
     }
     final TSDB tsdb = (TSDB) obj;
     
+    if (tsdb.getStatsCollector() != null) {
+      tsdb.getStatsCollector().incrementCounter("query.new", "endpoint", "2x");
+    }
+    
+    // check auth. 
+    final AuthState auth_state;
+    if (tsdb.getConfig().getBoolean(Authentication.AUTH_ENABLED_KEY)) {
+      if (request.getAttribute(AuthFilter.AUTH_STATE_KEY) == null || 
+          ((AuthState) request.getAttribute(AuthFilter.AUTH_STATE_KEY))
+            .getStatus() != AuthStatus.SUCCESS) {
+        throw new WebApplicationException("Access denied.", 
+            Response.Status.FORBIDDEN);
+      }
+      auth_state = (AuthState) request.getAttribute(AuthFilter.AUTH_STATE_KEY);
+    } else {
+      auth_state = null; // TODO - add an "unknown" auth user.
+    }
+    
     // initiate the tracer
-    final TsdbTrace trace;
+    final Trace trace;
     final Span query_span;
-    final TsdbPlugin tracer = tsdb.getRegistry().getDefaultPlugin(TsdbTracer.class);
+    final Tracer tracer = (Tracer) tsdb.getRegistry().getDefaultPlugin(Tracer.class);
     if (tracer != null) {
-      trace = ((TsdbTracer) tracer).getTracer(true);
-      query_span = trace.tracer()
-          .buildSpan(this.getClass().getSimpleName())
+      trace = tracer.newTrace(true, true);
+      query_span = trace.newSpanWithThread(this.getClass().getSimpleName())
           .withTag("endpoint", "/api/query")
           .withTag("startThread", Thread.currentThread().getName())
+          .withTag("user", auth_state != null ? auth_state.getUser() : "Unkown")
           // TODO - more useful info
           .start();
-      trace.setFirstSpan(query_span);
       request.setAttribute(TRACE_KEY, trace);
     } else {
       trace = null;
       query_span = null;
     }
-    
     Span parse_span = null;
     if (query_span != null) {
-      parse_span = trace.tracer()
-          .buildSpan("parseAndValidate")
-          .withTag("startThread", Thread.currentThread().getName())
-          .asChildOf(query_span)
+      parse_span = query_span.newChild("parseAndValidate")
           .start();
     }
     // parse the query
@@ -212,23 +234,19 @@ final public class QueryRpc {
         ts_query = JSON.parseToObject(request.getInputStream(), TSQuery.class);
       }
       // throws an exception if invalid.
-      ts_query.validateAndSetQuery();
+      ts_query.validateAndSetQuery(tsdb);
       request.setAttribute(V2_QUERY_KEY, ts_query);
     } catch (Exception e) {
       throw new QueryExecutionException("Invalid query", 400, e);
     }
     if (parse_span != null) {
-      parse_span.setTag("Status", "OK")
-                .setTag("finalThread", Thread.currentThread().getName())
+      parse_span.setSuccessTags()
                 .finish();
     }
     
     Span convert_span = null;
     if (query_span != null) {
-      convert_span = trace.tracer()
-          .buildSpan("convertAndValidate")
-          .withTag("startThread", Thread.currentThread().getName())
-          .asChildOf(query_span)
+      convert_span = query_span.newChild("convertAndValidate")
           .start();
     }
     // copy the required headers.
@@ -242,103 +260,32 @@ final public class QueryRpc {
       }
     }
     
-    final TimeSeriesQuery query = TSQuery.convertQuery(ts_query);
+    final TimeSeriesQuery query = TSQuery.convertQuery(tsdb, ts_query);
     if (query_span != null) {
       query_span.setTag("queryId", 
           Bytes.byteArrayToString(query.buildHashCode().asBytes()));
     }
-    query.validate();
-    request.setAttribute(QUERY_KEY, query);
+    query.validate(tsdb);
+    if (convert_span != null) {
+      convert_span.setSuccessTags()
+                  .finish();
+    }
+    
     LOG.info("Executing new query=" + JSON.serializeToString(
         ImmutableMap.<String, Object>builder()
         // TODO - possible upstream headers
         .put("queryId", Bytes.byteArrayToString(query.buildHashCode().asBytes()))
         .put("queryHash", Bytes.byteArrayToString(query.buildTimelessHashCode().asBytes()))
-        .put("traceId", trace != null ? trace.getTraceId() : null)
+        .put("traceId", trace != null ? trace.traceId() : "")
         .put("query", ts_query)
         .build()));
-    if (convert_span != null) {
-      convert_span.setTag("Status", "OK")
-                  .setTag("finalThread", Thread.currentThread().getName())
-                  .finish();
-    }
     
-    Span setup_span = null;
+    final Span setup_span;
     if (query_span != null) {
-      setup_span = trace.tracer()
-          .buildSpan("setupContext")
-          .withTag("startThread", Thread.currentThread().getName())
-          .asChildOf(query_span)
+      setup_span = query_span.newChild("setupContext")
           .start();
-    }
-    // setup the context and copy headers for downstream use.
-    final QueryContext context = new DefaultQueryContext(tsdb, 
-        tsdb.getRegistry().getDefaultExecutionGraph(), 
-        trace == null ? null : trace.tracer());
-    context.addSessionObject(HttpQueryV2Executor.SESSION_HEADERS_KEY, 
-        headers_copy);
-    request.setAttribute(CONTEXT_KEY, context);
-    
-    obj = context.executionGraph().sinkExecutor();
-    if (obj == null) {
-      throw new WebApplicationException("Execution graph returned a null "
-          + "sink executor: " + tsdb.getRegistry().getDefaultExecutionGraph(),
-          Response.Status.INTERNAL_SERVER_ERROR);
-    }
-    
-    final QueryExecutor<IteratorGroups> executor =
-        (QueryExecutor<IteratorGroups>) obj;
-    
-    /** Class called when the query has completed without an exception. Stashes
-     * the results in the request attributes and calls the async dispatch. */
-    class SuccessCB implements Callback<Object, IteratorGroups> {
-      final AsyncContext async;
-      SuccessCB(final AsyncContext async) {
-        this.async = async;
-      }
-      @Override
-      public Object call(final IteratorGroups groups) throws Exception {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Successful response for query=" 
-              + JSON.serializeToString(
-                  ImmutableMap.<String, Object>builder()
-                  // TODO - possible upstream headers
-                  .put("queryId", Bytes.byteArrayToString(query.buildHashCode().asBytes()))
-                  .put("queryHash", Bytes.byteArrayToString(query.buildTimelessHashCode().asBytes()))
-                  .put("traceId", trace != null ? trace.getTraceId() : null)
-                  .put("query", ts_query)
-                  .build()));
-        }
-        request.setAttribute(OpenTSDBApplication.QUERY_RESULT_ATTRIBUTE, groups);
-        try {
-          async.dispatch();
-        } catch (Exception e) {
-          LOG.error("Unexpected exception dispatching async request for "
-              + "query: " + ts_query, e);
-        }
-        return null;
-      }
-    }
-    
-    /** Exception handler, unwraps and stashes in the request attributes for 
-     * serialization. */
-    class ErrorCB implements Callback<Object, Exception> {
-      final AsyncContext async;
-      ErrorCB(final AsyncContext async) {
-        this.async = async;
-      }
-      @Override
-      public Object call(final Exception ex) throws Exception {
-        LOG.error("Exception for query: " 
-            + Bytes.byteArrayToString(query.buildHashCode().asBytes()), ex);
-        request.setAttribute(OpenTSDBApplication.QUERY_EXCEPTION_ATTRIBUTE, ex);
-        try {
-          async.dispatch();
-        } catch (Exception e) {
-          LOG.error("WFT? Dispatch may have already been called", e);
-        }
-        return null;
-      }
+    } else {
+      setup_span = null;
     }
     
     // start the Async context and pass it around. 
@@ -348,214 +295,119 @@ final public class QueryRpc {
     async.setTimeout((Integer) servlet_config.getServletContext()
         .getAttribute(OpenTSDBApplication.ASYNC_TIMEOUT_ATTRIBUTE));
     
-    if (setup_span != null) {
-      setup_span.setTag("Status", "OK")
-                .setTag("finalThread", Thread.currentThread().getName())
-                .finish();
+    // TODO - oh this is so ugly it isn't even funny.
+    final SemanticQuery q = query.convert(tsdb).build();
+    SerdesOptions serdes = q.getSerdesConfigs().isEmpty() ? null :
+      q.getSerdesConfigs().get(0);
+    if (serdes == null) {
+      serdes = JsonV2QuerySerdesOptions.newBuilder()
+          .setMsResolution(ts_query.getMsResolution())
+          .setShowQuery(ts_query.getShowQuery())
+          .setShowStats(ts_query.getShowStats())
+          .setShowSummary(ts_query.getShowSummary())
+          .setId("JsonV2QuerySerdes")
+          .build();
     }
     
-    Span execute_span = null;
-    if (query_span != null) {
-      execute_span = trace.tracer()
-          .buildSpan("startExecution")
-          .withTag("startThread", Thread.currentThread().getName())
-          .asChildOf(query_span)
-          .start();
-    }
-    try {
-      final QueryExecution<IteratorGroups> execution = 
-          executor.executeQuery(context, query, query_span);
-      execution.deferred()
-        .addCallback(new SuccessCB(async))
-        .addErrback(new ErrorCB(async));
-    } catch (Exception e) {
-      LOG.error("Unexpected exception adding callbacks to deferred.", e);
-      request.setAttribute(OpenTSDBApplication.QUERY_EXCEPTION_ATTRIBUTE, e);
-      try {
-        async.dispatch();
-      } catch (Exception ex) {
-        LOG.error("WFT? Dispatch may have already been called", ex);
+    final QueryContext ctx = SemanticQueryContext.newBuilder()
+        .setTSDB(tsdb)
+        .setQuery(q)
+        .setMode(QueryMode.SINGLE)
+        .setStats(DefaultQueryStats.newBuilder()
+            .setTrace(trace)
+            .setQuerySpan(query_span)
+            .build())
+        .setAuthState(auth_state)
+        .addSink(ServletSinkConfig.newBuilder()
+            .setId(ServletSinkFactory.TYPE)
+            .setSerdesOptions(serdes)
+            .setRequest(request)
+            .setAsync(async)
+            .build())
+        .build();
+    
+    class AsyncTimeout implements AsyncListener {
+
+      @Override
+      public void onComplete(final AsyncEvent event) throws IOException {
+        // no-op
       }
+
+      @Override
+      public void onTimeout(final AsyncEvent event) throws IOException {
+        LOG.error("The query has timed out");
+        try {
+          ctx.close();
+        } catch (Exception e) {
+          LOG.error("Failed to close the query: ", e);
+        }
+        
+        GenericExceptionMapper.serialize(
+            new QueryExecutionException("The query has exceeded "
+            + "the timeout limit.", 504), event.getAsyncContext().getResponse());
+        event.getAsyncContext().complete();
+        
+        try {
+          ctx.close();
+        } catch (Throwable t) {
+          LOG.error("Failed to close the query context", t);
+        }
+      }
+
+      @Override
+      public void onError(final AsyncEvent event) throws IOException {
+        LOG.error("WTF? An error for the AsyncTimeout?: " + event);
+      }
+
+      @Override
+      public void onStartAsync(final AsyncEvent event) throws IOException {
+        // no-op
+      }
+
     }
-    if (execute_span != null) {
-      execute_span.setTag("Status", "OK")
-                  .setTag("finalThread", Thread.currentThread().getName())
-                  .finish();
-    }
+
+    async.addListener(new AsyncTimeout());
+    async.start(new Runnable() {
+      public void run() {
+        Span execute_span = null;
+        try {
+          ctx.initialize(query_span).join();
+          if (setup_span != null) {
+            setup_span.setSuccessTags()
+                      .finish();
+          }
+          
+          if (query_span != null) {
+            execute_span = trace.newSpanWithThread("startExecution")
+                .withTag("startThread", Thread.currentThread().getName())
+                .asChildOf(query_span)
+                .start();
+          }
+          ctx.fetchNext(query_span);
+        } catch (Throwable t) {
+          LOG.error("Unexpected exception adding callbacks to deferred.", t);
+          //GenericExceptionMapper.serialize(t, response);
+          if (execute_span != null) {
+            execute_span.setErrorTags(t)
+                        .finish();
+          }
+          async.complete();
+          if (query_span != null) {
+            query_span.setErrorTags(t)
+                       .finish();
+          }
+          throw new QueryExecutionException("Unexpected expection", 500, t);
+        }
+        
+        if (execute_span != null) {
+          execute_span.setSuccessTags()
+                      .finish();
+        }
+      }
+    });
     return null;
   }
-
-  /**
-   * Method for serializing a successful query response.
-   * @param servlet_config The servlet config to fetch the TSDB from.
-   * @param request The request.
-   * @return a Response object with a 200 status code
-   */
-  @VisibleForTesting
-  Response handeResponse(final ServletConfig servlet_config, 
-                         final HttpServletRequest request) {
-    final IteratorGroups groups = (IteratorGroups) request.getAttribute(
-        OpenTSDBApplication.QUERY_RESULT_ATTRIBUTE);
-    final QueryContext context = (QueryContext) request.getAttribute(CONTEXT_KEY);
-    final TimeSeriesQuery query = (TimeSeriesQuery) request.getAttribute(QUERY_KEY);
-    final Span response_span;
-    final TsdbTrace trace;
-    if (context.getTracer() != null) {
-      trace = (TsdbTrace) request.getAttribute(TRACE_KEY);
-      response_span = context.getTracer().buildSpan("responseHandler")
-          .withTag("startThread", Thread.currentThread().getName())
-          .asChildOf(trace.getFirstSpan())
-          .start();
-    } else {
-      response_span = null;
-      trace = null;
-    }
-    
-    final TSQuery ts_query = (TSQuery) request.getAttribute(V2_QUERY_KEY);
-    final JsonV2QuerySerdesOptions options = JsonV2QuerySerdesOptions.newBuilder()
-        .setMsResolution(ts_query.getMsResolution())
-        .setShowQuery(ts_query.getShowQuery())
-        .setShowStats(ts_query.getShowStats())
-        .setShowSummary(ts_query.getShowSummary())
-        .build();
-    
-    /** The stream to write to. */
-    final StreamingOutput stream = new StreamingOutput() {
-      @Override
-      public void write(OutputStream output)
-          throws IOException, WebApplicationException {
-        Span serdes_span = null;
-        if (response_span != null) {
-          serdes_span = context.getTracer().buildSpan("serdes")
-              .withTag("startThread", Thread.currentThread().getName())
-              .asChildOf(response_span)
-              .start();
-        }
-        final JsonGenerator json = JSON.getFactory().createGenerator(output);
-        json.writeStartArray();
-        
-        final JsonV2QuerySerdes serdes = new JsonV2QuerySerdes(json);
-        serdes.serialize(query, options, output, groups);
-        
-        if (options.showSummary()) {
-          json.writeObjectFieldStart("summary");
-          json.writeStringField("queryHash", Bytes.byteArrayToString(
-              query.buildTimelessHashCode().asBytes()));
-          json.writeStringField("queryId", Bytes.byteArrayToString(
-              query.buildHashCode().asBytes()));
-          json.writeStringField("traceId", trace == null ? "null" : trace.getTraceId());
-          if (trace != null) {
-            trace.serializeJSON("trace", json);
-          }
-          json.writeEndObject();
-        }
-        
-        // final
-        json.writeEndArray();
-        json.close();
-        
-        // TODO - trace, other bits.
-        if (serdes_span != null) {
-          serdes_span.setTag("finalThread", Thread.currentThread().getName())
-                     .setTag("status", "OK")
-                     .finish();
-        }
-        
-        query_success.incrementAndGet();
-        LOG.info("Completing query=" 
-            + JSON.serializeToString(ImmutableMap.<String, Object>builder()
-            // TODO - possible upstream headers
-            .put("queryId", Bytes.byteArrayToString(query.buildHashCode().asBytes()))
-            .put("queryHash", Bytes.byteArrayToString(query.buildTimelessHashCode().asBytes()))
-            .put("traceId", trace != null ? trace.getTraceId() : null)
-            .put("status", Response.Status.OK)
-            .put("query", request.getAttribute(V2_QUERY_KEY))
-            .build()));
-          
-          QUERY_LOG.info("Completing query=" 
-            + JSON.serializeToString(ImmutableMap.<String, Object>builder()
-            // TODO - possible upstream headers
-            .put("queryId", Bytes.byteArrayToString(query.buildHashCode().asBytes()))
-            .put("queryHash", Bytes.byteArrayToString(query.buildTimelessHashCode().asBytes()))
-            .put("traceId", trace != null ? trace.getTraceId() : null)
-            .put("status", Response.Status.OK)
-            .put("trace", trace.serializeToString())
-            .put("query", request.getAttribute(V2_QUERY_KEY))
-            .build()));
-         
-          
-          if (response_span != null) {
-            response_span.setTag("finalThread", Thread.currentThread().getName())
-                         .setTag("status", "OK")
-                         .finish();
-          }
-          if (trace != null && trace.getFirstSpan() != null) {
-            trace.getFirstSpan()
-              .setTag("status", "OK")
-              .setTag("finalThread", Thread.currentThread().getName())
-              .finish();
-          }
-      }
-    };
-    
-    return Response.ok().entity(stream)
-        .type(MediaType.APPLICATION_JSON)
-        .build();
-    // all done!
-  }
   
-  /**
-   * Handles exceptions returned by the query execution.
-   * @param request The request.
-   * @return Always null.
-   * @throws Exception if something goes pear shaped.
-   */
-  @VisibleForTesting
-  Response handleException(final HttpServletRequest request) throws Exception {
-    final QueryContext context = (QueryContext) request.getAttribute(CONTEXT_KEY);
-    final TimeSeriesQuery query = (TimeSeriesQuery) request.getAttribute(QUERY_KEY);
-    final TsdbTrace trace;
-    if (context != null && context.getTracer() != null) {
-      trace = (TsdbTrace) request.getAttribute(TRACE_KEY);
-    } else {
-      trace = null;
-    }
-    
-    final Exception e = (Exception) request.getAttribute(
-            OpenTSDBApplication.QUERY_EXCEPTION_ATTRIBUTE);
-    LOG.info("Completing query=" 
-      + JSON.serializeToString(ImmutableMap.<String, Object>builder()
-      // TODO - possible upstream headers
-      .put("queryId", Bytes.byteArrayToString(query.buildHashCode().asBytes()))
-      .put("queryHash", Bytes.byteArrayToString(query.buildTimelessHashCode().asBytes()))
-      .put("traceId", trace != null ? trace.getTraceId() : null)
-      .put("status", Response.Status.OK)
-      .put("query", request.getAttribute(V2_QUERY_KEY))
-      .build()));
-    
-    QUERY_LOG.info("Completing query=" 
-       + JSON.serializeToString(ImmutableMap.<String, Object>builder()
-      
-      // TODO - possible upstream headers
-      .put("queryId", Bytes.byteArrayToString(query.buildHashCode().asBytes()))
-      .put("queryHash", Bytes.byteArrayToString(query.buildTimelessHashCode().asBytes()))
-      .put("traceId", trace != null ? trace.getTraceId() : null)
-      .put("status", Response.Status.OK)
-      .put("trace", trace.serializeToString())
-      .put("query", request.getAttribute(V2_QUERY_KEY))
-      .build()));
-    
-    if (trace != null && trace.getFirstSpan() != null) {
-      trace.getFirstSpan()
-        .setTag("status", "Error")
-        .setTag("finalThread", Thread.currentThread().getName())
-        .setTag("error", e.getMessage())
-        .log("exception", e)
-        .finish();
-    }
-    query_exceptions.incrementAndGet();
-    throw e;
-  }
 //  /**
 //   * Implements the /api/query endpoint to fetch data from OpenTSDB.
 //   * @param tsdb The TSDB to use for fetching data
@@ -1282,12 +1134,12 @@ TODO - restore!
 //    return query;
 //  }
   
-  /** @param collector Populates the collector with statistics */
-  public void collectStats(final StatsCollector collector) {
-    collector.record("http.query.invalid_requests", query_invalid);
-    collector.record("http.query.exceptions", query_exceptions);
-    collector.record("http.query.success", query_success);
-  }
+//  /** @param collector Populates the collector with statistics */
+//  public void collectStats(final StatsCollector collector) {
+//    collector.record("http.query.invalid_requests", query_invalid);
+//    collector.record("http.query.exceptions", query_exceptions);
+//    collector.record("http.query.success", query_success);
+//  }
   
 //  public static class LastPointQuery {
 //    

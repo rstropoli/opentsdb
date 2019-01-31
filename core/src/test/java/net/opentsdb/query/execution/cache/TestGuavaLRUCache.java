@@ -1,15 +1,17 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.query.execution.cache;
 
 import static org.junit.Assert.assertArrayEquals;
@@ -28,27 +30,26 @@ import org.powermock.api.mockito.PowerMockito;
 import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
 
-import com.stumbleupon.async.Deferred;
-
-import io.opentracing.Span;
-import net.opentsdb.core.TSDB;
-import net.opentsdb.query.context.QueryContext;
-import net.opentsdb.utils.Config;
+import net.opentsdb.configuration.Configuration;
+import net.opentsdb.configuration.UnitTestConfiguration;
+import net.opentsdb.core.DefaultTSDB;
+import net.opentsdb.query.QueryContext;
+import net.opentsdb.stats.Span;
 import net.opentsdb.utils.DateTime;
 
 @RunWith(PowerMockRunner.class)
 @PrepareForTest({ DateTime.class, GuavaLRUCache.class })
 public class TestGuavaLRUCache {
 
-  private TSDB tsdb;
-  private Config config;
+  private DefaultTSDB tsdb;
+  private Configuration config;
   private QueryContext context;
   private Span span;
   
   @Before
   public void before() throws Exception {
-    tsdb = mock(TSDB.class);
-    config = new Config(false);
+    tsdb = mock(DefaultTSDB.class);
+    config = UnitTestConfiguration.getConfiguration();
     context = mock(QueryContext.class);
     span = mock(Span.class);
     when(tsdb.getConfig()).thenReturn(config);
@@ -57,48 +58,41 @@ public class TestGuavaLRUCache {
   @Test
   public void initialize() throws Exception {
     GuavaLRUCache cache = new GuavaLRUCache();
-    cache.initialize(tsdb).join();
+    cache.initialize(tsdb, null).join();
     assertEquals(GuavaLRUCache.DEFAULT_SIZE_LIMIT, cache.sizeLimit());
     assertEquals(GuavaLRUCache.DEFAULT_MAX_OBJECTS, cache.maxObjects());
     assertEquals(0, cache.bytesStored());
     assertEquals(0, cache.cache().size());
     
-    config.overrideConfig("tsd.executor.plugin.guava.limit.objects", "42");
+    config.register("tsd.executor.plugin.guava.limit.objects", 42, false, "UT");
     cache = new GuavaLRUCache();
-    cache.initialize(tsdb).join();
+    cache.initialize(tsdb, null).join();
     assertEquals(GuavaLRUCache.DEFAULT_SIZE_LIMIT, cache.sizeLimit());
     assertEquals(42, cache.maxObjects());
     assertEquals(0, cache.bytesStored());
     assertEquals(0, cache.cache().size());
     
-    config.overrideConfig("tsd.executor.plugin.guava.limit.bytes", "16");
+    config.register("tsd.executor.plugin.guava.limit.bytes", 16, false, "UT");
     cache = new GuavaLRUCache();
-    cache.initialize(tsdb).join();
+    cache.initialize(tsdb, null).join();
     assertEquals(16, cache.sizeLimit());
     assertEquals(42, cache.maxObjects());
     assertEquals(0, cache.bytesStored());
     assertEquals(0, cache.cache().size());
-    
-    config.overrideConfig("tsd.executor.plugin.guava.limit.bytes", "NotANumber");
-    final Deferred<Object> deferred = cache.initialize(tsdb);
-    try {
-      deferred.join();
-      fail("Expected NumberFormatException");
-    } catch (NumberFormatException e) { }
   }
   
   @Test
   public void cacheAndFetchSingleEntry() throws Exception {
     final GuavaLRUCache cache = new GuavaLRUCache();
-    cache.initialize(tsdb).join();
+    cache.initialize(tsdb, null).join();
     assertEquals(0, cache.cache().size());
     
     cache.cache(new byte[] { 0, 0, 1 }, new byte[] { 0, 0, 1 }, 60000, 
-        TimeUnit.MILLISECONDS);
+        TimeUnit.MILLISECONDS, span);
     cache.cache(new byte[] { 0, 0, 2 }, new byte[] { 0, 0, 2 }, 60000, 
-        TimeUnit.MILLISECONDS);
+        TimeUnit.MILLISECONDS, span);
     cache.cache(new byte[] { 0, 0, 3 }, new byte[] { 0, 0, 3 }, 60000, 
-        TimeUnit.MILLISECONDS);
+        TimeUnit.MILLISECONDS, span);
     
     assertEquals(3, cache.cache().size());
     assertEquals(9, cache.bytesStored());
@@ -142,13 +136,13 @@ public class TestGuavaLRUCache {
     
     // null value
     cache.cache(new byte[] { 0, 0, 5 }, null, 60000, 
-        TimeUnit.MILLISECONDS);
+        TimeUnit.MILLISECONDS, span);
     assertNull(cache.fetch(context, new byte[] { 0, 0, 5 }, span)
         .deferred().join());
     
     // empty value
     cache.cache(new byte[] { 0, 0, 5 }, new byte[] { }, 60000, 
-        TimeUnit.MILLISECONDS);
+        TimeUnit.MILLISECONDS, span);
     assertEquals(0, cache.fetch(context, new byte[] { 0, 0, 5 }, span)
         .deferred().join().length);
   }
@@ -156,7 +150,7 @@ public class TestGuavaLRUCache {
   @Test
   public void cacheAndFetchSingleEntryExpired() throws Exception {
     final GuavaLRUCache cache = new GuavaLRUCache();
-    cache.initialize(tsdb).join();
+    cache.initialize(tsdb, null).join();
     assertEquals(0, cache.cache().size());
     
     PowerMockito.mockStatic(DateTime.class);
@@ -167,7 +161,7 @@ public class TestGuavaLRUCache {
       .thenReturn(61000000000L);
     
     cache.cache(new byte[] { 0, 0, 1 }, new byte[] { 0, 0, 1 }, 60000, 
-        TimeUnit.MILLISECONDS);
+        TimeUnit.MILLISECONDS, span);
     
     assertArrayEquals(new byte[] { 0, 0, 1 }, 
         cache.fetch(context, new byte[] { 0, 0, 1 }, span).deferred().join());
@@ -203,7 +197,7 @@ public class TestGuavaLRUCache {
   @Test
   public void cacheAndFetchMultiEntry() throws Exception {
     final GuavaLRUCache cache = new GuavaLRUCache();
-    cache.initialize(tsdb).join();
+    cache.initialize(tsdb, null).join();
     assertEquals(0, cache.cache().size());
     
     byte[][] keys = new byte[][] {
@@ -219,7 +213,7 @@ public class TestGuavaLRUCache {
     };
     
     cache.cache(keys, values, new long[] { 60000, 60000, 60000 }, 
-        TimeUnit.MILLISECONDS);
+        TimeUnit.MILLISECONDS, span);
 
     assertEquals(3, cache.cache().size());
     assertEquals(9, cache.bytesStored());
@@ -283,7 +277,7 @@ public class TestGuavaLRUCache {
   @Test
   public void cacheAndFetchMultiEntryExpired() throws Exception {
     final GuavaLRUCache cache = new GuavaLRUCache();
-    cache.initialize(tsdb).join();
+    cache.initialize(tsdb, null).join();
     assertEquals(0, cache.cache().size());
     
     PowerMockito.mockStatic(DateTime.class);
@@ -306,7 +300,7 @@ public class TestGuavaLRUCache {
     };
     
     cache.cache(keys, values, new long[] { 60000, 60000 }, 
-        TimeUnit.MILLISECONDS);
+        TimeUnit.MILLISECONDS, span);
 
     assertEquals(2, cache.cache().size());
     assertEquals(6, cache.bytesStored());
@@ -343,7 +337,7 @@ public class TestGuavaLRUCache {
       null
     };
     cache.cache(keys, values, new long[] { 60000, 60000 }, 
-        TimeUnit.MILLISECONDS);
+        TimeUnit.MILLISECONDS, span);
     results = cache.fetch(context, keys, span).deferred().join();
     assertNull(results[0]);
     assertNull(results[1]);
@@ -354,7 +348,7 @@ public class TestGuavaLRUCache {
       new byte[] { }
     };
     cache.cache(keys, values, new long[] { 60000, 60000 }, 
-        TimeUnit.MILLISECONDS);
+        TimeUnit.MILLISECONDS, span);
     results = cache.fetch(context, keys, span).deferred().join();
     assertEquals(0, results[0].length);
     assertEquals(0, results[1].length);
@@ -377,38 +371,38 @@ public class TestGuavaLRUCache {
     final GuavaLRUCache cache = new GuavaLRUCache();
     try {
       cache.cache(new byte[] { 0, 0, 1 }, new byte[] { 0, 0, 1 }, 60000, 
-          TimeUnit.MILLISECONDS);
+          TimeUnit.MILLISECONDS, span);
       fail("Expected IllegalStateException");
     } catch (IllegalStateException e) { }
     
     try {
       cache.cache(keys, values, new long[] { 60000, 60000, 6000 }, 
-          TimeUnit.MILLISECONDS);
+          TimeUnit.MILLISECONDS, span);
       fail("Expected IllegalStateException");
     } catch (IllegalStateException e) { }
     
-    cache.initialize(tsdb).join();
+    cache.initialize(tsdb, null).join();
     
     try {
-      cache.cache(null, new byte[] { 0, 0, 1 }, 60000, TimeUnit.MILLISECONDS);
+      cache.cache(null, new byte[] { 0, 0, 1 }, 60000, TimeUnit.MILLISECONDS, span);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     try {
       cache.cache(new byte[] { }, new byte[] { 0, 0, 1 }, 60000, 
-          TimeUnit.MILLISECONDS);
+          TimeUnit.MILLISECONDS, span);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     try {
       cache.cache(null, values, new long[] { 60000, 60000, 60000 }, 
-          TimeUnit.MILLISECONDS);
+          TimeUnit.MILLISECONDS, span);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     try {
       cache.cache(new byte[][] { }, values, new long[] { 60000, 60000, 60000 }, 
-          TimeUnit.MILLISECONDS);
+          TimeUnit.MILLISECONDS, span);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
@@ -420,7 +414,7 @@ public class TestGuavaLRUCache {
   
     try {
       cache.cache(keys, values, new long[] { 60000, 60000, 60000 }, 
-          TimeUnit.MILLISECONDS);
+          TimeUnit.MILLISECONDS, span);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
@@ -432,19 +426,19 @@ public class TestGuavaLRUCache {
   
     try {
       cache.cache(keys, null, new long[] { 60000, 60000, 60000 }, 
-          TimeUnit.MILLISECONDS);
+          TimeUnit.MILLISECONDS, span);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     try {
-      cache.cache(keys, keys, null, TimeUnit.MILLISECONDS);
+      cache.cache(keys, keys, null, TimeUnit.MILLISECONDS, span);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
     
     // wrong expirations length
     try {
       cache.cache(keys, keys, new long[] { 60000, 60000 }, 
-          TimeUnit.MILLISECONDS);
+          TimeUnit.MILLISECONDS, span);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
   }
@@ -468,7 +462,7 @@ public class TestGuavaLRUCache {
       fail("Expected IllegalStateException");
     } catch (IllegalStateException e) { }
     
-    cache.initialize(tsdb).join();
+    cache.initialize(tsdb, null).join();
     
     try {
       cache.fetch(context, (byte[]) null, span).deferred().join();

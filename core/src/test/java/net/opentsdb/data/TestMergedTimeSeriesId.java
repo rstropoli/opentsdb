@@ -1,579 +1,1099 @@
 // This file is part of OpenTSDB.
-// Copyright (C) 2017  The OpenTSDB Authors.
+// Copyright (C) 2017-2018  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.data;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import static org.mockito.Mockito.mock;
 
-import java.util.ArrayList;
-
+import org.junit.Before;
 import org.junit.Test;
-
-import com.google.common.collect.Lists;
 
 import net.opentsdb.common.Const;
 
 public class TestMergedTimeSeriesId {
-
+  private static final byte[] BYTES_1 = "Tyrell".getBytes();
+  private static final byte[] BYTES_1_ALT = "Tyrell".getBytes();
+  private static final byte[] BYTES_2 = "Lanister".getBytes();
+  private static final byte[] BYTES_2_ALT = "Lanister".getBytes();
+  private static final byte[] BYTES_3 = "Medici".getBytes();
+  private static final byte[] BYTES_3_ALT = "Medici".getBytes();
+  private static final byte[] FAMILY = "Family".getBytes();
+  private static final byte[] DRAGON = "Dragon".getBytes();
+  private static final byte[] DRAGON_ALT = "Dragon".getBytes();
+  private static final byte[] DRAGON_1 = "Drogon".getBytes();
+  private static final byte[] DRAGON_1_ALT = "Drogon".getBytes();
+  private static final byte[] DRAGON_2 = "Rhaegal".getBytes();
+  private static final byte[] DRAGON_2_ALT = "Rhaegal".getBytes();
+  private static final byte[] METRIC = "ice.dragon".getBytes();
+  private static final byte[] METRIC_ALT = "ice.dragon".getBytes();
+  
+  private TimeSeriesDataSourceFactory data_store;
+  
+  @Before
+  public void before() throws Exception {
+    data_store = mock(TimeSeriesDataSourceFactory.class);
+  }
+  
   @Test
-  public void alias() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
-        .setAlias("Series A")
+  public void setAlias() throws Exception {
+    MergedTimeSeriesId.Builder builder = MergedTimeSeriesId.newBuilder();
+    assertNull(builder.alias);
+    
+    builder.setAlias("alias");
+    assertArrayEquals("alias".getBytes(Const.UTF8_CHARSET), builder.alias);
+    
+    builder.setAlias((String) null);
+    assertNull(builder.alias);
+    
+    builder.setAlias(new byte[] { 'h', 'i' });
+    assertArrayEquals("hi".getBytes(Const.UTF8_CHARSET), builder.alias);
+  }
+  
+  @Test
+  public void setNamespace() throws Exception {
+    MergedTimeSeriesId.Builder builder = MergedTimeSeriesId.newBuilder();
+    assertNull(builder.namespace);
+    
+    builder.setNamespace("namespace");
+    assertArrayEquals("namespace".getBytes(Const.UTF8_CHARSET), builder.namespace);
+    
+    builder.setNamespace((String) null);
+    assertNull(builder.namespace);
+    
+    builder.setNamespace(new byte[] { 'n', 's' });
+    assertArrayEquals("ns".getBytes(Const.UTF8_CHARSET), builder.namespace);
+  }
+  
+  @Test
+  public void setMetric() throws Exception {
+    MergedTimeSeriesId.Builder builder = MergedTimeSeriesId.newBuilder();
+    assertNull(builder.metric);
+    
+    builder.setMetric("metric");
+    assertArrayEquals("metric".getBytes(Const.UTF8_CHARSET), builder.metric);
+    
+    builder.setMetric((String) null);
+    assertNull(builder.metric);
+    
+    builder.setMetric(new byte[] { 'm', 'e', 't' });
+    assertArrayEquals("met".getBytes(Const.UTF8_CHARSET), builder.metric);
+  }
+  
+  @Test
+  public void addSeries() throws Exception {
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
+        .setNamespace("Tyrell")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
-        .setAlias("Series B")
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
+        .setNamespace("Lanister")
+        .setMetric("ice.dragon")
         .build();
     
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    MergedTimeSeriesId.Builder builder = MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+      .addSeries(a)
+      .addSeries(b);
+    assertEquals(2, builder.ids.size());
+    assertEquals(Const.TS_STRING_ID, builder.type);
+    
+    try {
+      builder.addSeries(mock(TimeSeriesByteId.class));
+      fail("Expected RuntimeException");
+    } catch (RuntimeException e) { }
+    assertEquals(2, builder.ids.size());
+    assertEquals(Const.TS_STRING_ID, builder.type);
+    
+    try {
+      builder.addSeries(null);
+      fail("Expected RuntimeException");
+    } catch (RuntimeException e) { }
+    assertEquals(2, builder.ids.size());
+    assertEquals(Const.TS_STRING_ID, builder.type);
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .setNamespace(BYTES_1)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .setNamespace(BYTES_2)
+        .setMetric(METRIC_ALT)
+        .build();
+    builder = MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d);
+      assertEquals(2, builder.ids.size());
+      assertEquals(Const.TS_BYTE_ID, builder.type);
+      
+      d = BaseTimeSeriesByteId.newBuilder(mock(TimeSeriesDataSourceFactory.class))
+          .setNamespace(BYTES_2_ALT)
+          .setMetric(METRIC)
+          .build();
+      try {
+        MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+          .addSeries(c)
+          .addSeries(d)
+          .build();
+        fail("Expected RuntimeException");
+      } catch (RuntimeException e) { }
+  }
+  
+  @Test
+  public void alias() throws Exception {
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
+        .setAlias("Series A")
+        .setMetric("ice.dragon")
+        .build();
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
+        .setAlias("Series B")
+        .setMetric("ice.dragon")
+        .build();
+    
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertNull(merged.alias());
     
-    merged = MergedTimeSeriesId.newBuilder()
+    merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .setAlias("Merged!")
         .build();
-    assertArrayEquals("Merged!".getBytes(Const.UTF8_CHARSET), merged.alias());
+    assertEquals("Merged!", merged.alias());
     
-    merged = MergedTimeSeriesId.newBuilder()
+    merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .setAlias("")
         .build();
     assertNull(merged.alias());
     
-    merged = MergedTimeSeriesId.newBuilder()
+    merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .setAlias((String) null)
         .build();
     assertNull(merged.alias());
     
-    merged = MergedTimeSeriesId.newBuilder()
+    merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
-        .setAlias("Merged!".getBytes(Const.UTF8_CHARSET))
+        .setAlias("Merged!")
         .build();
-    assertArrayEquals("Merged!".getBytes(Const.UTF8_CHARSET), merged.alias());
+    assertEquals("Merged!", merged.alias());
     
-    merged = MergedTimeSeriesId.newBuilder()
+    merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
-        .setAlias(new byte[] { 0, 0, 1 })
+        .setAlias("000001")
         .build();
-    assertArrayEquals(new byte[] { 0, 0, 1 }, merged.alias());
+    assertEquals("000001", merged.alias());
   }
   
   @Test
   public void mergeNameSpaces() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
-        .setNamespaces(Lists.newArrayList("Tyrell", "Frey", "Dorne"))
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
+        .setNamespace("Tyrell")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
-        .setNamespaces(Lists.newArrayList("Lanister", "Frey", "Dorne"))
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
+        .setNamespace("Lanister")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
-    assertEquals(4, merged.namespaces().size());
-    assertArrayEquals("Dorne".getBytes(Const.UTF8_CHARSET), merged.namespaces().get(0));
-    assertArrayEquals("Frey".getBytes(Const.UTF8_CHARSET), merged.namespaces().get(1));
-    assertArrayEquals("Lanister".getBytes(Const.UTF8_CHARSET), merged.namespaces().get(2));
-    assertArrayEquals("Tyrell".getBytes(Const.UTF8_CHARSET), merged.namespaces().get(3));
+    assertEquals("Tyrell", merged.namespace());
 
-    b = SimpleStringTimeSeriesId.newBuilder()
-        .setNamespaces(new ArrayList<String>())
-        .build();
-    merged = MergedTimeSeriesId.newBuilder()
+    merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
+        .setNamespace("Dorne")
         .build();
-    assertEquals(3, merged.namespaces().size());
-    assertArrayEquals("Dorne".getBytes(Const.UTF8_CHARSET), merged.namespaces().get(0));
-    assertArrayEquals("Frey".getBytes(Const.UTF8_CHARSET), merged.namespaces().get(1));
-    assertArrayEquals("Tyrell".getBytes(Const.UTF8_CHARSET), merged.namespaces().get(2));
+    assertEquals("Dorne", merged.namespace());
     
-    b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .setNamespace(BYTES_1)
+        .setMetric(METRIC)
         .build();
-    merged = MergedTimeSeriesId.newBuilder()
-        .addSeries(a)
-        .addSeries(b)
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .setNamespace(BYTES_2)
+        .setMetric(METRIC_ALT)
         .build();
-    assertEquals(3, merged.namespaces().size());
-    assertArrayEquals("Dorne".getBytes(Const.UTF8_CHARSET), merged.namespaces().get(0));
-    assertArrayEquals("Frey".getBytes(Const.UTF8_CHARSET), merged.namespaces().get(1));
-    assertArrayEquals("Tyrell".getBytes(Const.UTF8_CHARSET), merged.namespaces().get(2));
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertArrayEquals(BYTES_1, merged_bytes.namespace());
     
-    a = SimpleStringTimeSeriesId.newBuilder()
-        .setNamespaces(new ArrayList<String>())
+    merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .setNamespace(BYTES_3)
+        .addSeries(c)
+        .addSeries(d)
         .build();
-    b = SimpleStringTimeSeriesId.newBuilder()
-        .setNamespaces(new ArrayList<String>())
-        .build();
-    merged = MergedTimeSeriesId.newBuilder()
-        .addSeries(a)
-        .addSeries(b)
-        .build();
-    assertTrue(merged.namespaces().isEmpty());
+    assertArrayEquals(BYTES_3, merged_bytes.namespace());
   }
 
   @Test
   public void mergeMetrics() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
-        .setMetrics(Lists.newArrayList("Tyrell", "Frey", "Dorne"))
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
+        .setMetric("Tyrell")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
-        .setMetrics(Lists.newArrayList("Lanister", "Frey", "Dorne"))
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
+        .setMetric("Lanister")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
-    assertEquals(4, merged.metrics().size());
-    assertArrayEquals("Dorne".getBytes(Const.UTF8_CHARSET), merged.metrics().get(0));
-    assertArrayEquals("Frey".getBytes(Const.UTF8_CHARSET), merged.metrics().get(1));
-    assertArrayEquals("Lanister".getBytes(Const.UTF8_CHARSET), merged.metrics().get(2));
-    assertArrayEquals("Tyrell".getBytes(Const.UTF8_CHARSET), merged.metrics().get(3));
+    assertEquals("Tyrell", merged.metric());
 
-    b = SimpleStringTimeSeriesId.newBuilder()
-        .setMetrics(new ArrayList<String>())
-        .build();
-    merged = MergedTimeSeriesId.newBuilder()
+    merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
+        .setMetric("Stark")
         .build();
-    assertEquals(3, merged.metrics().size());
-    assertArrayEquals("Dorne".getBytes(Const.UTF8_CHARSET), merged.metrics().get(0));
-    assertArrayEquals("Frey".getBytes(Const.UTF8_CHARSET), merged.metrics().get(1));
-    assertArrayEquals("Tyrell".getBytes(Const.UTF8_CHARSET), merged.metrics().get(2));
+    assertEquals("Stark", merged.metric());
     
-    b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .setMetric(BYTES_1)
         .build();
-    merged = MergedTimeSeriesId.newBuilder()
-        .addSeries(a)
-        .addSeries(b)
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .setMetric(BYTES_2)
         .build();
-    assertEquals(3, merged.metrics().size());
-    assertArrayEquals("Dorne".getBytes(Const.UTF8_CHARSET), merged.metrics().get(0));
-    assertArrayEquals("Frey".getBytes(Const.UTF8_CHARSET), merged.metrics().get(1));
-    assertArrayEquals("Tyrell".getBytes(Const.UTF8_CHARSET), merged.metrics().get(2));
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertArrayEquals(BYTES_1, merged_bytes.metric());
     
-    a = SimpleStringTimeSeriesId.newBuilder()
-        .setMetrics(new ArrayList<String>())
+    merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .setMetric(BYTES_3)
+        .addSeries(c)
+        .addSeries(d)
         .build();
-    b = SimpleStringTimeSeriesId.newBuilder()
-        .setMetrics(new ArrayList<String>())
-        .build();
-    merged = MergedTimeSeriesId.newBuilder()
-        .addSeries(a)
-        .addSeries(b)
-        .build();
-    assertTrue(merged.metrics().isEmpty());
+    assertArrayEquals(BYTES_3, merged_bytes.metric());
   }
   
   @Test
   public void mergeTagsSame() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertEquals(2, merged.tags().size());
-    assertArrayEquals("web01".getBytes(Const.UTF8_CHARSET), 
-        merged.tags().get("host".getBytes(Const.UTF8_CHARSET)));
-    assertArrayEquals("lax".getBytes(Const.UTF8_CHARSET), 
-        merged.tags().get("colo".getBytes(Const.UTF8_CHARSET)));
+    assertEquals("web01", 
+        merged.tags().get("host"));
+    assertEquals("lax", 
+        merged.tags().get("colo"));
     assertTrue(merged.aggregatedTags().isEmpty());
     assertTrue(merged.disjointTags().isEmpty());
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addTags(DRAGON, DRAGON_1)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1_ALT)
+        .addTags(DRAGON_ALT, DRAGON_1_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertEquals(2, merged_bytes.tags().size());
+    assertArrayEquals(BYTES_1, merged_bytes.tags().get(FAMILY));
+    assertArrayEquals(DRAGON_1, merged_bytes.tags().get(DRAGON));
+    assertTrue(merged_bytes.aggregatedTags().isEmpty());
+    assertTrue(merged_bytes.disjointTags().isEmpty());
   }
   
   @Test
   public void mergeTagsAgg1() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web02")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
-    System.out.println(merged);
+    
     assertEquals(1, merged.tags().size());
-    assertArrayEquals("lax".getBytes(Const.UTF8_CHARSET), 
-        merged.tags().get("colo".getBytes(Const.UTF8_CHARSET)));
+    assertEquals("lax", 
+        merged.tags().get("colo"));
     assertEquals(1, merged.aggregatedTags().size());
-    assertArrayEquals("host".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("host", 
         merged.aggregatedTags().get(0));
     assertTrue(merged.disjointTags().isEmpty());
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addTags(DRAGON, DRAGON_1)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_2)
+        .addTags(DRAGON_ALT, DRAGON_1_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertEquals(1, merged_bytes.tags().size());
+    assertArrayEquals(DRAGON_1, merged_bytes.tags().get(DRAGON));
+    assertEquals(1, merged_bytes.aggregatedTags().size());
+    assertArrayEquals(FAMILY, merged_bytes.aggregatedTags().get(0));
+    assertTrue(merged_bytes.disjointTags().isEmpty());
   }
   
   @Test
   public void mergeTagsAgg2() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web02")
         .addTags("colo", "lga")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertTrue(merged.tags().isEmpty());
     assertEquals(2, merged.aggregatedTags().size());
-    assertArrayEquals("colo".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("colo", 
         merged.aggregatedTags().get(0));
-    assertArrayEquals("host".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("host", 
         merged.aggregatedTags().get(1));
     assertTrue(merged.disjointTags().isEmpty());
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addTags(DRAGON, DRAGON_2)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_2_ALT)
+        .addTags(DRAGON_ALT, DRAGON_1_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertTrue(merged_bytes.tags().isEmpty());
+    assertEquals(2, merged_bytes.aggregatedTags().size());
+    assertArrayEquals(DRAGON, merged_bytes.aggregatedTags().get(0));
+    assertArrayEquals(FAMILY, merged_bytes.aggregatedTags().get(1));
+    assertTrue(merged_bytes.disjointTags().isEmpty());
   }
   
   @Test
   public void mergeTagsExistingAgg() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addAggregatedTag("host")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web02")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertEquals(1, merged.tags().size());
-    assertArrayEquals("lax".getBytes(Const.UTF8_CHARSET), 
-        merged.tags().get("colo".getBytes(Const.UTF8_CHARSET)));
+    assertEquals("lax", 
+        merged.tags().get("colo"));
     assertEquals(1, merged.aggregatedTags().size());
-    assertArrayEquals("host".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("host", 
         merged.aggregatedTags().get(0));
     assertTrue(merged.disjointTags().isEmpty());
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addAggregatedTag(FAMILY)
+        .addTags(DRAGON, DRAGON_1)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_2)
+        .addTags(DRAGON_ALT, DRAGON_1_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertEquals(1, merged.tags().size());
+    assertArrayEquals(DRAGON_1, merged_bytes.tags().get(DRAGON));
+    assertEquals(1, merged.aggregatedTags().size());
+    assertArrayEquals(FAMILY, merged_bytes.aggregatedTags().get(0));
+    assertTrue(merged_bytes.disjointTags().isEmpty());
   }
   
   @Test
   public void mergeTagsIncomingAgg() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addAggregatedTag("host")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertEquals(1, merged.tags().size());
-    assertArrayEquals("lax".getBytes(Const.UTF8_CHARSET), 
-        merged.tags().get("colo".getBytes(Const.UTF8_CHARSET)));
+    assertEquals("lax", 
+        merged.tags().get("colo"));
     assertEquals(1, merged.aggregatedTags().size());
-    assertArrayEquals("host".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("host", 
         merged.aggregatedTags().get(0));
     assertTrue(merged.disjointTags().isEmpty());
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addTags(DRAGON, DRAGON_1)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addAggregatedTag(FAMILY)
+        .addTags(DRAGON_ALT, DRAGON_1_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertEquals(1, merged.tags().size());
+    assertArrayEquals(DRAGON_1, merged_bytes.tags().get(DRAGON));
+    assertEquals(1, merged.aggregatedTags().size());
+    assertArrayEquals(FAMILY, merged_bytes.aggregatedTags().get(0));
+    assertTrue(merged_bytes.disjointTags().isEmpty());
   }
   
   @Test
   public void mergeTagsExistingDisjoint() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addDisjointTag("host")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web02")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertEquals(1, merged.tags().size());
-    assertArrayEquals("lax".getBytes(Const.UTF8_CHARSET), 
-        merged.tags().get("colo".getBytes(Const.UTF8_CHARSET)));
+    assertEquals("lax", 
+        merged.tags().get("colo"));
     assertTrue(merged.aggregatedTags().isEmpty());
     assertEquals(1, merged.disjointTags().size());
-    assertArrayEquals("host".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("host", 
         merged.disjointTags().get(0));
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addDisjointTag(FAMILY)
+        .addTags(DRAGON, DRAGON_1)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addTags(DRAGON_ALT, DRAGON_1_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertEquals(1, merged.tags().size());
+    assertArrayEquals(DRAGON_1, merged_bytes.tags().get(DRAGON));
+    assertTrue(merged_bytes.aggregatedTags().isEmpty());
+    assertEquals(1, merged.disjointTags().size());
+    assertArrayEquals(FAMILY, merged_bytes.disjointTags().get(0));
   }
   
   @Test
   public void mergeTagsIncomingDisjoint() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addDisjointTag("host")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertEquals(1, merged.tags().size());
-    assertArrayEquals("lax".getBytes(Const.UTF8_CHARSET), 
-        merged.tags().get("colo".getBytes(Const.UTF8_CHARSET)));
+    assertEquals("lax", 
+        merged.tags().get("colo"));
     assertTrue(merged.aggregatedTags().isEmpty());
     assertEquals(1, merged.disjointTags().size());
-    assertArrayEquals("host".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("host", 
         merged.disjointTags().get(0));
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addTags(DRAGON, DRAGON_1)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addDisjointTag(FAMILY)
+        .addTags(DRAGON_ALT, DRAGON_1_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertEquals(1, merged.tags().size());
+    assertArrayEquals(DRAGON_1, merged_bytes.tags().get(DRAGON));
+    assertTrue(merged_bytes.aggregatedTags().isEmpty());
+    assertEquals(1, merged.disjointTags().size());
+    assertArrayEquals(FAMILY, merged_bytes.disjointTags().get(0));
   }
   
   @Test
   public void mergeTagsDisjoint1() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("owner", "Lanister")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertEquals(1, merged.tags().size());
-    assertArrayEquals("web01".getBytes(Const.UTF8_CHARSET), 
-        merged.tags().get("host".getBytes(Const.UTF8_CHARSET)));
+    assertEquals("web01", 
+        merged.tags().get("host"));
     assertTrue(merged.aggregatedTags().isEmpty());
     assertEquals(2, merged.disjointTags().size());
-    assertArrayEquals("colo".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("colo", 
         merged.disjointTags().get(0));
-    assertArrayEquals("owner".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("owner", 
         merged.disjointTags().get(1));
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addTags(DRAGON, DRAGON_1)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1_ALT)
+        .addTags(BYTES_2_ALT, BYTES_3_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertEquals(1, merged.tags().size());
+    assertArrayEquals(BYTES_1, merged_bytes.tags().get(FAMILY));
+    assertTrue(merged_bytes.aggregatedTags().isEmpty());
+    assertEquals(2, merged.disjointTags().size());
+    assertArrayEquals(DRAGON, merged_bytes.disjointTags().get(0));
+    assertArrayEquals(BYTES_2, merged_bytes.disjointTags().get(1));
   }
   
   @Test
   public void mergeTagsDisjoint2() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addTags("dept", "KingsGaurd")
         .addTags("owner", "Lanister")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertTrue(merged.tags().isEmpty());
     assertTrue(merged.aggregatedTags().isEmpty());
-    
     assertEquals(4, merged.disjointTags().size());
-    assertArrayEquals("colo".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("colo", 
         merged.disjointTags().get(0));
-    assertArrayEquals("dept".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("dept", 
         merged.disjointTags().get(1));
-    assertArrayEquals("host".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("host", 
         merged.disjointTags().get(2));
-    assertArrayEquals("owner".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("owner", 
         merged.disjointTags().get(3));
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addTags(DRAGON, DRAGON_1)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(BYTES_3, DRAGON_2)
+        .addTags(BYTES_2_ALT, BYTES_3_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertTrue(merged_bytes.tags().isEmpty());
+    assertTrue(merged_bytes.aggregatedTags().isEmpty());
+    assertEquals(4, merged.disjointTags().size());
+    assertArrayEquals(DRAGON, merged_bytes.disjointTags().get(0));
+    assertArrayEquals(FAMILY, merged_bytes.disjointTags().get(1));
+    assertArrayEquals(BYTES_2, merged_bytes.disjointTags().get(2));
+    assertArrayEquals(BYTES_3, merged_bytes.disjointTags().get(3));
   }
 
   @Test
   public void mergeTagsAlreadyAgged() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addAggregatedTag("colo")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertEquals(1, merged.tags().size());
-    assertArrayEquals("web01".getBytes(Const.UTF8_CHARSET), 
-        merged.tags().get("host".getBytes(Const.UTF8_CHARSET)));
+    assertEquals("web01", 
+        merged.tags().get("host"));
     assertEquals(1, merged.aggregatedTags().size());
-    assertArrayEquals("colo".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("colo", 
         merged.aggregatedTags().get(0));
     assertTrue(merged.disjointTags().isEmpty());
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addTags(DRAGON, DRAGON_1)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1_ALT)
+        .addAggregatedTag(DRAGON_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertEquals(1, merged_bytes.tags().size());
+    assertArrayEquals(BYTES_1, merged_bytes.tags().get(FAMILY));
+    assertEquals(1, merged_bytes.aggregatedTags().size());
+    assertArrayEquals(DRAGON, merged_bytes.aggregatedTags().get(0));
+    assertTrue(merged_bytes.disjointTags().isEmpty());
   }
   
   @Test
   public void mergeTagsAlreadyDisjoint() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addDisjointTag("colo")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertEquals(1, merged.tags().size());
-    assertArrayEquals("web01".getBytes(Const.UTF8_CHARSET), 
-        merged.tags().get("host".getBytes(Const.UTF8_CHARSET)));
+    assertEquals("web01", 
+        merged.tags().get("host"));
     assertTrue(merged.aggregatedTags().isEmpty());
     assertEquals(1, merged.disjointTags().size());
-    assertArrayEquals("colo".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("colo", 
         merged.disjointTags().get(0));
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addDisjointTag(DRAGON)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1_ALT)
+        .addTags(DRAGON_ALT, DRAGON_1_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertEquals(1, merged_bytes.tags().size());
+    assertArrayEquals(BYTES_1, merged_bytes.tags().get(FAMILY));
+    assertTrue(merged_bytes.aggregatedTags().isEmpty());
+    assertEquals(1, merged_bytes.disjointTags().size());
+    assertEquals(DRAGON, merged_bytes.disjointTags().get(0));
   }
 
   @Test
   public void mergeTagsAlreadyAggedToDisjoint() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addAggregatedTag("colo")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("colo", "lax")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId c = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId c = BaseTimeSeriesStringId.newBuilder()
         .addTags("host", "web01")
         .addTags("dept", "KingsGaurd")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .addSeries(c)
         .build();
     assertEquals(1, merged.tags().size());
-    assertArrayEquals("web01".getBytes(Const.UTF8_CHARSET), 
-        merged.tags().get("host".getBytes(Const.UTF8_CHARSET)));
+    assertEquals("web01", 
+        merged.tags().get("host"));
     assertTrue(merged.aggregatedTags().isEmpty());
     assertEquals(2, merged.disjointTags().size());
-    assertArrayEquals("colo".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("colo", 
         merged.disjointTags().get(0));
-    assertArrayEquals("dept".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("dept", 
         merged.disjointTags().get(1));
+    
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addDisjointTag(DRAGON)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId e = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addTags(DRAGON_ALT, DRAGON_1_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId f = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addTags(FAMILY, BYTES_1)
+        .addTags(BYTES_3, DRAGON_2_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(d)
+        .addSeries(e)
+        .addSeries(f)
+        .build();
+    assertEquals(1, merged_bytes.tags().size());
+    assertArrayEquals(BYTES_1, merged_bytes.tags().get(FAMILY));
+    assertTrue(merged_bytes.aggregatedTags().isEmpty());
+    assertEquals(2, merged_bytes.disjointTags().size());
+    assertEquals(DRAGON, merged_bytes.disjointTags().get(0));
+    assertEquals(BYTES_3, merged_bytes.disjointTags().get(1));
   }
   
   @Test
   public void mergeAggTagsSame() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addAggregatedTag("host")
         .addAggregatedTag("colo")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addAggregatedTag("host")
         .addAggregatedTag("colo")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertTrue(merged.tags().isEmpty());
     assertEquals(2, merged.aggregatedTags().size());
-    assertArrayEquals("colo".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("colo", 
         merged.aggregatedTags().get(0));
-    assertArrayEquals("host".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("host", 
         merged.aggregatedTags().get(1));
     assertTrue(merged.disjointTags().isEmpty());
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addAggregatedTag(FAMILY)
+        .addAggregatedTag(DRAGON)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addAggregatedTag(FAMILY)
+        .addAggregatedTag(DRAGON_ALT)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertTrue(merged_bytes.tags().isEmpty());
+    assertEquals(2, merged_bytes.aggregatedTags().size());
+    assertArrayEquals(DRAGON, merged_bytes.aggregatedTags().get(0));
+    assertArrayEquals(FAMILY, merged_bytes.aggregatedTags().get(1));
   }
   
   @Test
   public void mergeAggTagsDisjoint1() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addAggregatedTag("host")
         .addAggregatedTag("colo")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addAggregatedTag("host")
         .addAggregatedTag("owner")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertTrue(merged.tags().isEmpty());
     assertEquals(1, merged.aggregatedTags().size());
-    assertArrayEquals("host".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("host", 
         merged.aggregatedTags().get(0));
     assertEquals(2, merged.disjointTags().size());
-    assertArrayEquals("colo".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("colo", 
         merged.disjointTags().get(0));
-    assertArrayEquals("owner".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("owner", 
         merged.disjointTags().get(1));
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addAggregatedTag(FAMILY)
+        .addAggregatedTag(DRAGON)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addAggregatedTag(FAMILY)
+        .addAggregatedTag(BYTES_3)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertTrue(merged_bytes.tags().isEmpty());
+    assertEquals(1, merged_bytes.aggregatedTags().size());
+    assertArrayEquals(FAMILY, merged_bytes.aggregatedTags().get(0));
+    assertEquals(2, merged_bytes.disjointTags().size());
+    assertArrayEquals(DRAGON, merged_bytes.disjointTags().get(0));
+    assertArrayEquals(BYTES_3, merged_bytes.disjointTags().get(1));
   }
   
   @Test
   public void mergeAggTagsDisjoint2() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addAggregatedTag("host")
         .addAggregatedTag("colo")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addAggregatedTag("dept")
         .addAggregatedTag("owner")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertTrue(merged.tags().isEmpty());
     assertTrue(merged.aggregatedTags().isEmpty());
     assertEquals(4, merged.disjointTags().size());
-    assertArrayEquals("colo".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("colo", 
         merged.disjointTags().get(0));
-    assertArrayEquals("dept".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("dept", 
         merged.disjointTags().get(1));
-    assertArrayEquals("host".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("host", 
         merged.disjointTags().get(2));
-    assertArrayEquals("owner".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("owner", 
         merged.disjointTags().get(3));
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addAggregatedTag(FAMILY)
+        .addAggregatedTag(DRAGON)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addAggregatedTag(BYTES_1)
+        .addAggregatedTag(BYTES_3)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertTrue(merged_bytes.tags().isEmpty());
+    assertTrue(merged_bytes.aggregatedTags().isEmpty());
+    assertEquals(4, merged_bytes.disjointTags().size());
+    assertArrayEquals(DRAGON, merged_bytes.disjointTags().get(0));
+    assertArrayEquals(FAMILY, merged_bytes.disjointTags().get(1));
+    assertArrayEquals(BYTES_3, merged_bytes.disjointTags().get(2));
+    assertArrayEquals(BYTES_1, merged_bytes.disjointTags().get(3));
   }
 
   @Test
   public void mergeDisjointTags() throws Exception {
-    TimeSeriesId a = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId a = BaseTimeSeriesStringId.newBuilder()
         .addDisjointTag("host")
         .addDisjointTag("colo")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId b = SimpleStringTimeSeriesId.newBuilder()
+    TimeSeriesStringId b = BaseTimeSeriesStringId.newBuilder()
         .addDisjointTag("host")
         .addDisjointTag("owner")
+        .setMetric("ice.dragon")
         .build();
-    TimeSeriesId merged = MergedTimeSeriesId.newBuilder()
+    TimeSeriesStringId merged = (TimeSeriesStringId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
         .addSeries(a)
         .addSeries(b)
         .build();
     assertTrue(merged.tags().isEmpty());
     assertTrue(merged.aggregatedTags().isEmpty());
     assertEquals(3, merged.disjointTags().size());
-    assertArrayEquals("colo".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("colo", 
         merged.disjointTags().get(0));
-    assertArrayEquals("host".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("host", 
         merged.disjointTags().get(1));
-    assertArrayEquals("owner".getBytes(Const.UTF8_CHARSET), 
+    assertEquals("owner", 
         merged.disjointTags().get(2));
+    
+    TimeSeriesByteId c = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addDisjointTag(FAMILY)
+        .addDisjointTag(DRAGON)
+        .setMetric(METRIC)
+        .build();
+    TimeSeriesByteId d = BaseTimeSeriesByteId.newBuilder(data_store)
+        .addDisjointTag(FAMILY)
+        .addDisjointTag(BYTES_3)
+        .setMetric(METRIC_ALT)
+        .build();
+    TimeSeriesByteId merged_bytes = (TimeSeriesByteId) MergedTimeSeriesId.newBuilder()
+        .setFullMerge(true)
+        .addSeries(c)
+        .addSeries(d)
+        .build();
+    assertTrue(merged_bytes.tags().isEmpty());
+    assertTrue(merged_bytes.aggregatedTags().isEmpty());
+    assertEquals(3, merged_bytes.disjointTags().size());
+    assertArrayEquals(DRAGON, merged_bytes.disjointTags().get(0));
+    assertArrayEquals(FAMILY, merged_bytes.disjointTags().get(1));
+    assertArrayEquals(BYTES_3, merged_bytes.disjointTags().get(2));
   }
 }

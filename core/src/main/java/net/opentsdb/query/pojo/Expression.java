@@ -1,28 +1,26 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2015-2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.query.pojo;
 
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeMap;
-
-import org.apache.commons.jexl2.JexlEngine;
-import org.apache.commons.jexl2.Script;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -41,6 +39,7 @@ import com.google.common.hash.HashCode;
 import com.google.common.hash.Hashing;
 
 import net.opentsdb.core.Const;
+import net.opentsdb.core.TSDB;
 import net.opentsdb.query.pojo.Join.SetOperator;
 
 /**
@@ -51,11 +50,6 @@ import net.opentsdb.query.pojo.Join.SetOperator;
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonDeserialize(builder = Expression.Builder.class)
 public class Expression extends Validatable implements Comparable<Expression> {
-  /** Docs don't say whether this is thread safe or not. SOME methods are marked
-   * as not thread safe, so I assume it's ok to instantiate one of these guys
-   * and keep creating scripts from it.
-   */
-  public final static JexlEngine JEXL_ENGINE = new JexlEngine();
   
   /** An id for this expression for use in output selection or nested expressions */
   private String id;
@@ -75,8 +69,6 @@ public class Expression extends Validatable implements Comparable<Expression> {
   /** Set of unique variables used by this expression. */
   private Set<String> variables;
   
-  /** The parsed expression via JEXL. */
-  private Script parsed_expression;
   
   /**
    * Default ctor 
@@ -151,7 +143,7 @@ public class Expression extends Validatable implements Comparable<Expression> {
   /** Validates the expression
    * @throws IllegalArgumentException if one or more parameters were invalid
    */
-  public void validate() {
+  public void validate(final TSDB tsdb) {
     if (id == null || id.isEmpty()) {
       throw new IllegalArgumentException("missing or empty id");
     }
@@ -163,26 +155,12 @@ public class Expression extends Validatable implements Comparable<Expression> {
     
     // parse it just to make sure we're happy and extract the variable names. 
     // Will throw JexlException
-    parsed_expression = JEXL_ENGINE.createScript(expr);
-    variables = new HashSet<String>();
-    for (final List<String> exp_list : 
-      JEXL_ENGINE.getVariables(parsed_expression)) {
-      for (final String variable : exp_list) {
-        variables.add(variable);
-      }
-    }
+    // TODO
     
     // others are optional
     if (join == null) {
       join = Join.newBuilder().setOperator(SetOperator.UNION).build();
     }
-  }
-
-  /** @return The parsed expression. May be null if {@link validate} has not 
-   * been called yet. */
-  @JsonIgnore
-  public Script getParsedExpression() {
-    return parsed_expression;
   }
   
   /** @return A set of unique variables for the expression. May be null if 

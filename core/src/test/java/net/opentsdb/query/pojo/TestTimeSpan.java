@@ -1,17 +1,21 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2015-2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.query.pojo;
 
+import net.opentsdb.core.MockTSDB;
+import net.opentsdb.core.MockTSDBDefault;
 import net.opentsdb.utils.Bytes;
 import net.opentsdb.utils.DateTime;
 import net.opentsdb.utils.JSON;
@@ -25,14 +29,24 @@ import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import org.junit.BeforeClass;
+
 public class TestTimeSpan {
+  
+  public static MockTSDB TSDB;
+  
+  @BeforeClass
+  public static void beforeClass() {
+    TSDB = MockTSDBDefault.getMockTSDB();
+  }
+  
   @Test(expected = IllegalArgumentException.class)
   public void startIsNull() {
     String json = "{\"start\":null,\"end\":\"2015/05/05\","
         + "\"timezone\":\"UTC\",\"downsample\":\"15m-avg-nan\","
         + ",\"aggregator\":\"sum\"}";
     Timespan timespan = JSON.parseToObject(json, Timespan.class);
-    timespan.validate();
+    timespan.validate(TSDB);
   }
 
   @Test(expected = IllegalArgumentException.class)
@@ -41,7 +55,7 @@ public class TestTimeSpan {
         + "\"timezone\":\"UTC\",\"downsample\":\"15m-avg-nan\""
         + ",\"aggregator\":\"sum\"}";
     Timespan timespan = JSON.parseToObject(json, Timespan.class);
-    timespan.validate();
+    timespan.validate(TSDB);
   }
 
   @Test 
@@ -50,7 +64,7 @@ public class TestTimeSpan {
         + "\"timezone\":\"UTC\",\"downsample\":\"15m-avg-nan\""
         + ",\"aggregator\":\"sum\"}";
     Timespan timespan = JSON.parseToObject(json, Timespan.class);
-    timespan.validate();
+    timespan.validate(TSDB);
   }
 
   @Test
@@ -59,7 +73,7 @@ public class TestTimeSpan {
         + "\"timezone\":\"UTC\",\"downsample\":\"15m-avg-nan\""
         + ",\"aggregator\":\"sum\"}";
     Timespan timespan = JSON.parseToObject(json, Timespan.class);
-    timespan.validate();
+    timespan.validate(TSDB);
   }
 
   @Test(expected = IllegalArgumentException.class)
@@ -68,7 +82,7 @@ public class TestTimeSpan {
         + "\"timezone\":\"UTC\",\"downsample\":\"15m-avg-nan\","
         + "}";
     Timespan timespan = JSON.parseToObject(json, Timespan.class);
-    timespan.validate();
+    timespan.validate(TSDB);
   }
 
   @Test(expected = IllegalArgumentException.class)
@@ -77,7 +91,7 @@ public class TestTimeSpan {
         + "\"timezone\":\"UTC\",\"downsample\":\"15m-avg-nan\""
         + ",\"aggregator\":\"\"}";
     Timespan timespan = JSON.parseToObject(json, Timespan.class);
-    timespan.validate();
+    timespan.validate(TSDB);
   }
 
   @Test(expected = IllegalArgumentException.class)
@@ -86,7 +100,7 @@ public class TestTimeSpan {
         + "\"timezone\":\"UTC\",\"downsample\":\"15m-avg-nan\""
         + ",\"interpolation\":\"LERP\"}";
     Timespan timespan = JSON.parseToObject(json, Timespan.class);
-    timespan.validate();
+    timespan.validate(TSDB);
   }
 
   @Test(expected = IllegalArgumentException.class)
@@ -95,7 +109,7 @@ public class TestTimeSpan {
         + "\"timezone\":\"UTC\",\"downsample\":\"15m-avg-nan\""
         + ",\"interpolation\":\"LERP\"}";
     Timespan timespan = JSON.parseToObject(json, Timespan.class);
-    timespan.validate();
+    timespan.validate(TSDB);
   }
 
   @Test(expected = IllegalArgumentException.class)
@@ -103,7 +117,7 @@ public class TestTimeSpan {
     String json = "{\"start\":\"1h-ago\",\"end\":\"2015/05/05\",\"timezone\":\"UTC\","
         + "\"downsampler\":\"xxx\"}";
     Timespan timespan = JSON.parseToObject(json, Timespan.class);
-    timespan.validate();
+    timespan.validate(TSDB);
   }
 
   @Test(expected = IllegalArgumentException.class)
@@ -113,7 +127,7 @@ public class TestTimeSpan {
         + "\"fillPolicy\":{\"policy\":\"nan\"}},\"aggregator\":\"sum\","
         + "\"sliceConfig\":\"1\"}";
     Timespan timespan = JSON.parseToObject(json, Timespan.class);
-    timespan.validate();
+    timespan.validate(TSDB);
   }
   
   @Test
@@ -193,7 +207,7 @@ public class TestTimeSpan {
             .setFillPolicy(new NumericFillPolicy(FillPolicy.NOT_A_NUMBER)).build())
         .setRateOptions(RateOptions.newBuilder().setCounter(true))
         .build();
-    timespan.validate();
+    timespan.validate(TSDB);
     assertEquals(expected, timespan);
   }
 
@@ -225,7 +239,7 @@ public class TestTimeSpan {
             .setInterval("1h"))
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("50%")
         .build();
     
@@ -241,7 +255,7 @@ public class TestTimeSpan {
     assertEquals("UTC", clone.getTimezone());
     assertEquals("1h", clone.getDownsampler().getInterval());
     assertTrue(clone.isRate());
-    assertEquals(30000, clone.getRateOptions().getInterval());
+    assertEquals("30s", clone.getRateOptions().getInterval());
     assertEquals("50%", clone.getSliceConfig());
     assertEquals(start, clone.startTime().msEpoch());
     assertEquals(end, clone.endTime().msEpoch());
@@ -257,7 +271,7 @@ public class TestTimeSpan {
     assertEquals("UTC", clone.getTimezone());
     assertEquals("1h", clone.getDownsampler().getInterval());
     assertTrue(clone.isRate());
-    assertEquals(30000, clone.getRateOptions().getInterval());
+    assertEquals("30s", clone.getRateOptions().getInterval());
     assertEquals("50%", clone.getSliceConfig());
     assertEquals(start, clone.startTime().msEpoch());
     assertNotEquals(end, clone.endTime().msEpoch());
@@ -276,7 +290,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("50%")
         .build();
     
@@ -291,7 +305,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("50%")
         .build();
     assertEquals(t1.hashCode(), t2.hashCode());
@@ -311,7 +325,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("50%")
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());
@@ -331,7 +345,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("50%")
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());
@@ -351,7 +365,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("50%")
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());
@@ -371,7 +385,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("50%")
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());
@@ -392,7 +406,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("50%")
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());
@@ -410,7 +424,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("50%")
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());
@@ -428,7 +442,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("50%")
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());
@@ -446,7 +460,7 @@ public class TestTimeSpan {
         //    .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("50%")
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());
@@ -464,7 +478,7 @@ public class TestTimeSpan {
             .build())
         .setRate(false)  // <-- diff
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("50%")
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());
@@ -482,7 +496,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(15000))  // <-- diff
+            .setInterval("15s"))  // <-- diff
         .setSliceConfig("50%")
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());
@@ -500,7 +514,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         //.setRateOptions(RateOptions.newBuilder()
-        //    .setInterval(30000))  // <-- diff
+        //    .setInterval("30s"))  // <-- diff
         .setSliceConfig("50%")
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());
@@ -518,7 +532,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         .setSliceConfig("75%")   // <-- diff
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());
@@ -536,7 +550,7 @@ public class TestTimeSpan {
             .build())
         .setRate(true)
         .setRateOptions(RateOptions.newBuilder()
-            .setInterval(30000))
+            .setInterval("30s"))
         //.setSliceConfig("50%")   // <-- diff
         .build();
     assertNotEquals(t1.hashCode(), t2.hashCode());

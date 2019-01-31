@@ -1,15 +1,17 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2015  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.query.pojo;
 
 import java.util.NoSuchElementException;
@@ -17,8 +19,9 @@ import java.util.TimeZone;
 
 import com.google.common.base.MoreObjects;
 
-import net.opentsdb.core.Aggregator;
-import net.opentsdb.core.Aggregators;
+import net.opentsdb.core.TSDB;
+import net.opentsdb.data.types.numeric.aggregators.NumericAggregator;
+import net.opentsdb.data.types.numeric.aggregators.NumericAggregatorFactory;
 import net.opentsdb.utils.DateTime;
 
 /**
@@ -34,11 +37,13 @@ public final class DownsamplingSpecification {
   public static final long NO_INTERVAL = 0L;
 
   /** Special value representing no downsampling function given. */
-  public static final Aggregator NO_FUNCTION = null;
+  public static final NumericAggregator NO_FUNCTION = null;
 
   /** The default fill policy. */
   public static final FillPolicy DEFAULT_FILL_POLICY = FillPolicy.NONE;
 
+  //public static final HistogramAggregation NO_HIST_AGG = null;
+  
   // Parsed downsample interval.
   private final long interval;
   
@@ -46,7 +51,7 @@ public final class DownsamplingSpecification {
   private final String string_interval;
   
   // Parsed downsampler function.
-  private final Aggregator function;
+  private final NumericAggregator function;
   
   // Parsed fill policy: whether to interpolate or to fill.
   private final FillPolicy fill_policy;
@@ -57,6 +62,8 @@ public final class DownsamplingSpecification {
   // The user provided timezone for calendar alignment (defaults to UTC)
   private TimeZone timezone;
 
+  //private final HistogramAggregation hist_agg;
+  
   /**
    * A specification indicating no downsampling is requested.
    */
@@ -67,39 +74,41 @@ public final class DownsamplingSpecification {
     string_interval = null;
     use_calendar = false;
     timezone = DateTime.timezones.get(DateTime.UTC_ID);
+    //hist_agg = NO_HIST_AGG;
   }
 
-  /**
-   * Non-stringified, piecewise c-tor.
-   * @param interval The downsampling interval, in milliseconds.
-   * @param function The downsampling function.
-   * @param fill_policy The policy specifying how to deal with missing data.
-   * @throws IllegalArgumentException if any argument is invalid.
-   * @deprecated since 2.3
-   */
-  public DownsamplingSpecification(final long interval,
-      final Aggregator function, final FillPolicy fill_policy) {
-    if (null == function) {
-      throw new IllegalArgumentException("downsampling function cannot be null");
-    }
-    if (interval <= 0L) {
-      throw new IllegalArgumentException("interval not > 0: " + interval);
-    }
-    if (null == fill_policy) {
-      throw new IllegalArgumentException("fill policy cannot be null");
-    }
-    if (function == Aggregators.NONE) {
-      throw new IllegalArgumentException("cannot use the NONE "
-          + "aggregator for downsampling");
-    }
-
-    this.interval = interval;
-    this.function = function;
-    this.fill_policy = fill_policy;
-    string_interval = null;
-    use_calendar = false;
-    timezone = DateTime.timezones.get(DateTime.UTC_ID);
-  }
+//  /**
+//   * Non-stringified, piecewise c-tor.
+//   * @param interval The downsampling interval, in milliseconds.
+//   * @param function The downsampling function.
+//   * @param fill_policy The policy specifying how to deal with missing data.
+//   * @throws IllegalArgumentException if any argument is invalid.
+//   * @deprecated since 2.3
+//   */
+//  public DownsamplingSpecification(final long interval,
+//      final NumericAggregator function, final FillPolicy fill_policy) {
+//    if (null == function) {
+//      throw new IllegalArgumentException("downsampling function cannot be null");
+//    }
+//    if (interval <= 0L) {
+//      throw new IllegalArgumentException("interval not > 0: " + interval);
+//    }
+//    if (null == fill_policy) {
+//      throw new IllegalArgumentException("fill policy cannot be null");
+//    }
+//    if (function == Aggregators.NONE) {
+//      throw new IllegalArgumentException("cannot use the NONE "
+//          + "aggregator for downsampling");
+//    }
+//
+//    this.interval = interval;
+//    this.function = function;
+//    this.fill_policy = fill_policy;
+//    string_interval = null;
+//    use_calendar = false;
+//    timezone = DateTime.timezones.get(DateTime.UTC_ID);
+//    //hist_agg = NO_HIST_AGG;
+//  }
 
   /**
    * C-tor for string representations.
@@ -107,10 +116,11 @@ public final class DownsamplingSpecification {
    * {@code interval-function[-fill_policy]}.
    * This ctor supports the "all" flag to downsample to a single value as well
    * as units suffixed with 'c' to use the calendar for downsample alignment.
+   * @param tsdb The non-null TSDB used for validation
    * @param specification String representation of a downsample specifier.
    * @throws IllegalArgumentException if the specification is null or invalid.
    */
-  public DownsamplingSpecification(final String specification) {
+  public DownsamplingSpecification(final TSDB tsdb, final String specification) {
     if (null == specification) {
       throw new IllegalArgumentException("Downsampling specifier cannot be " +
         "null");
@@ -147,17 +157,24 @@ public final class DownsamplingSpecification {
       string_interval = parts[0];
     }
 
+//    if (parts[1].toLowerCase().equals("sum")) {
+//      hist_agg = HistogramAggregation.SUM;
+//    } else {
+//      hist_agg = null;
+//    }
+    
     // FUNCTION.
-    try {
-      function = Aggregators.get(parts[1]);
-    } catch (final NoSuchElementException e) {
-      throw new IllegalArgumentException("No such downsampling function: " +
-        parts[1]);
-    }
-    if (function == Aggregators.NONE) {
+    if (parts[1].toLowerCase().equals("none")) {
       throw new IllegalArgumentException("cannot use the NONE "
           + "aggregator for downsampling");
     }
+    NumericAggregatorFactory agg_factory = tsdb.getRegistry()
+        .getPlugin(NumericAggregatorFactory.class, parts[1]);
+    if (agg_factory == null) {
+      throw new IllegalArgumentException("No such downsampling function: " +
+          parts[1]);
+    }
+    function = agg_factory.newAggregator(false);
 
     // FILL POLICY.
     if (3 == parts.length) {
@@ -215,7 +232,7 @@ public final class DownsamplingSpecification {
    * Get the downsampling function.
    * @return the downsampling function.
    */
-  public Aggregator getFunction() {
+  public NumericAggregator getFunction() {
     return function;
   }
 
@@ -238,6 +255,10 @@ public final class DownsamplingSpecification {
   public TimeZone getTimezone() {
     return timezone;
   }
+  
+//  public HistogramAggregation getHistogramAggregation() {
+//    return hist_agg;
+//  }
   
   @Override
   public String toString() {

@@ -1,19 +1,20 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2015-2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.query.pojo;
 
 import java.util.List;
-import java.util.NoSuchElementException;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -30,8 +31,9 @@ import com.google.common.collect.Ordering;
 import com.google.common.hash.HashCode;
 import com.google.common.hash.Hashing;
 
-import net.opentsdb.core.Aggregators;
 import net.opentsdb.core.Const;
+import net.opentsdb.core.TSDB;
+import net.opentsdb.data.types.numeric.aggregators.NumericAggregatorFactory;
 import net.opentsdb.utils.DateTime;
 
 /**
@@ -158,7 +160,7 @@ public class Metric extends Validatable implements Comparable<Metric> {
   /** Validates the metric
    * @throws IllegalArgumentException if one or more parameters were invalid
    */
-  public void validate() {
+  public void validate(final TSDB tsdb) {
     if (metric == null || metric.isEmpty()) {
       throw new IllegalArgumentException("missing or empty metric");
     }
@@ -173,9 +175,8 @@ public class Metric extends Validatable implements Comparable<Metric> {
     }
     
     if (aggregator != null && !aggregator.isEmpty()) {
-      try {
-        Aggregators.get(aggregator.toLowerCase());
-      } catch (final NoSuchElementException e) {
+      if (tsdb.getRegistry().getPlugin(NumericAggregatorFactory.class, 
+          aggregator.toLowerCase()) == null) {
         throw new IllegalArgumentException("Invalid aggregator");
       }
     }
@@ -185,11 +186,11 @@ public class Metric extends Validatable implements Comparable<Metric> {
     }
     
     if (downsampler != null) {
-      downsampler.validate();
+      downsampler.validate(tsdb);
     }
     
     if (rate_options != null) {
-      rate_options.validate();
+      rate_options.validate(tsdb);
     }
   }
   

@@ -1,15 +1,17 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.utils;
 
 import java.util.ArrayList;
@@ -27,6 +29,9 @@ public class Deferreds {
   /** A singleton to group deferreds that are expected to return nulls on completion. */
   public static final NullGroupCB NULL_GROUP_CB = new NullGroupCB(null);
   
+  /** A singleton to group deferreds that are expected to return nulls on completion. */
+  public static final VoidGroupCB VOID_GROUP_CB = new VoidGroupCB(null);
+  
   /** A simple class to group deferreds that are expected to return nulls on completion. */
   public static class NullGroupCB implements Callback<Object, ArrayList<Object>> {
     private final Deferred<Object> deferred;
@@ -42,6 +47,28 @@ public class Deferreds {
     
     @Override
     public Object call(final ArrayList<Object> ignored) throws Exception {
+      if (deferred != null) {
+        deferred.callback(null);
+      }
+      return null;
+    }
+  }
+  
+  /** A simple class to group deferreds that are expected to return nulls on completion. */
+  public static class VoidGroupCB implements Callback<Void, ArrayList<Void>> {
+    private final Deferred<Void> deferred;
+    
+    /**
+     * Default Ctor
+     * @param deferred a non-null Deferred to call on completion or null if
+     * not used.
+     */
+    public VoidGroupCB(final Deferred<Void> deferred) {
+      this.deferred = deferred;
+    }
+    
+    @Override
+    public Void call(final ArrayList<Void> ignored) throws Exception {
       if (deferred != null) {
         deferred.callback(null);
       }

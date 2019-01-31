@@ -5,7 +5,7 @@
     <parent>
       <groupId>net.opentsdb</groupId>
       <artifactId>opentsdb</artifactId>
-      <version>3.0.83-SNAPSHOT</version>
+      <version>3.0.86-SNAPSHOT</version>
       <relativePath>../pom.xml</relativePath>
     </parent>
     
@@ -29,6 +29,11 @@
         </dependency>
         <dependency>
           <groupId>net.opentsdb</groupId>
+          <artifactId>opentsdb-http-config</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>net.opentsdb</groupId>
           <artifactId>opentsdb-executors-http</artifactId>
           <version>${project.version}</version>
         </dependency>
@@ -40,6 +45,21 @@
         <dependency>
           <groupId>net.opentsdb</groupId>
           <artifactId>opentsdb-server-undertow</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>net.opentsdb</groupId>
+          <artifactId>opentsdb-asynchbase</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>net.opentsdb</groupId>
+          <artifactId>opentsdb-executors-http</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>net.opentsdb</groupId>
+          <artifactId>opentsdb-elasticsearch-transportclient</artifactId>
           <version>${project.version}</version>
         </dependency>
     </dependencies>
@@ -79,7 +99,7 @@
               <groupId>com.spotify</groupId>
               <artifactId>docker-maven-plugin</artifactId>
               <version>0.4.14</version>
-              
+
               <configuration>
                 <serverId>docker-hub</serverId>
                 <dockerDirectory>${basedir}/src/resources/docker</dockerDirectory>
@@ -123,18 +143,18 @@
                   </goals>
                   <configuration>
                     <image>opentsdb:${project.version}</image>
-                    <newName>${env.DOCKER_USERNAME}/opentsdb:${project.version}</newName>
+                    <newName>${env.DOCKER_REPOSITORY}/opentsdb:${project.version}</newName>
                   </configuration>
                 </execution>
                 
                 <execution>
                   <id>push-image</id>
-                  <phase>deploy</phase>
+                  <phase>install</phase>
                   <goals>
                     <goal>push</goal>
                   </goals>
                   <configuration>
-                    <imageName>${env.DOCKER_USERNAME}/opentsdb</imageName>
+                    <imageName>${env.DOCKER_REPOSITORY}/opentsdb</imageName>
                   </configuration>
                 </execution>
               </executions>

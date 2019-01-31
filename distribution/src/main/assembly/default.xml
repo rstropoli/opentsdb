@@ -23,7 +23,11 @@
       <includes>
         <include>net.opentsdb:opentsdb-common</include>
         <include>net.opentsdb:opentsdb-core</include>
+		<include>net.opentsdb:opentsdb-http-config</include>
         <include>net.opentsdb:opentsdb-server-undertow</include>
+        <include>net.opentsdb:opentsdb-asynchbase</include>
+		<include>net.opentsdb:opentsdb-executors-http</include>
+		<include>net.opentsdb:opentsdb-elasticsearch-transportclient</include>
       </includes>
       <outputDirectory>lib</outputDirectory>
       <useProjectArtifact>false</useProjectArtifact>
@@ -44,22 +48,17 @@
       <outputDirectory>bin</outputDirectory>
     </file>
     <file>
-      <source>src/resources/opentsdb.conf</source>
+      <source>src/resources/opentsdb.yaml</source>
+      <fileMode>0755</fileMode>
+      <outputDirectory>conf</outputDirectory>
+    </file>
+    <file>
+      <source>src/resources/opentsdb_dev.yaml</source>
       <fileMode>0755</fileMode>
       <outputDirectory>conf</outputDirectory>
     </file>
     <file>
       <source>src/resources/logback.xml</source>
-      <fileMode>0755</fileMode>
-      <outputDirectory>conf</outputDirectory>
-    </file>
-    <file>
-      <source>src/resources/plugins.json</source>
-      <fileMode>0755</fileMode>
-      <outputDirectory>conf</outputDirectory>
-    </file>
-    <file>
-      <source>src/resources/default_execution_graphs.json</source>
       <fileMode>0755</fileMode>
       <outputDirectory>conf</outputDirectory>
     </file>

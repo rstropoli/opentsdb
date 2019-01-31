@@ -1,25 +1,35 @@
 // This file is part of OpenTSDB.
-// Copyright (C) 2017 The OpenTSDB Authors.
+// Copyright (C) 2017-2018 The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.query.execution.serdes;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonInclude.Include;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+
+import net.opentsdb.query.serdes.SerdesOptions;
 
 /**
  * Serdes options for the Json version 2 serializer.
  * 
  * @since 3.0
  */
-public class JsonV2QuerySerdesOptions implements SerdesOptions {
+@JsonInclude(Include.NON_NULL)
+@JsonDeserialize(builder = JsonV2QuerySerdesOptions.Builder.class)
+public class JsonV2QuerySerdesOptions extends BaseSerdesOptions {
   /** Whether or not to show the TSUIDs. */
   private boolean show_tsuids;
   
@@ -35,43 +45,53 @@ public class JsonV2QuerySerdesOptions implements SerdesOptions {
   /** Whether or not to show the summary. */
   private boolean show_summary;
   
+  /** The number of time series necessary to switch to parallel mode. */
+  private int parallel_threshold;
+  
   /**
    * Default ctor.
    * @param builder Non-null builder.
    */
   protected JsonV2QuerySerdesOptions(final Builder builder) {
+    super(builder);
     show_tsuids = builder.showTsuids;
     msResolution = builder.msResolution;
     show_query = builder.showQuery;
     show_stats = builder.showStats;
     show_summary = builder.showSummary;
+    parallel_threshold = builder.parallelThreshold;
   }
   
-  public boolean showTsuids() {
+  public boolean getShowTsuids() {
     return show_tsuids;
   }
   
-  public boolean msResolution() {
+  public boolean getMsResolution() {
     return msResolution;
   }
 
-  public boolean showQuery() {
+  public boolean getShowQuery() {
     return show_query;
   }
 
-  public boolean showStats() {
+  public boolean getShowStats() {
     return show_stats;
   }
 
-  public boolean showSummary() {
+  public boolean getShowSummary() {
     return show_summary;
+  }
+  
+  public int getParallelThreshold() {
+    return parallel_threshold;
   }
   
   public static Builder newBuilder() {
     return new Builder();
   }
   
-  public static class Builder {
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public static class Builder extends BaseSerdesOptions.Builder {
     @JsonProperty
     private boolean showTsuids;
     @JsonProperty
@@ -82,6 +102,8 @@ public class JsonV2QuerySerdesOptions implements SerdesOptions {
     private boolean showStats;
     @JsonProperty
     private boolean showSummary;
+    @JsonProperty
+    private int parallelThreshold;
     
     public Builder setShowTsuids(final boolean showTsuids) {
       this.showTsuids = showTsuids;
@@ -108,7 +130,12 @@ public class JsonV2QuerySerdesOptions implements SerdesOptions {
       return this;
     }
     
-    public JsonV2QuerySerdesOptions build() {
+    public Builder setParallelThreshold(final int parallelThreshold) {
+      this.parallelThreshold = parallelThreshold;
+      return this;
+    }
+    
+    public SerdesOptions build() {
       return new JsonV2QuerySerdesOptions(this);
     }
   }

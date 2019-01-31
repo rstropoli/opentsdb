@@ -1,17 +1,20 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.exceptions;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -32,8 +35,8 @@ public class QueryExecutionException extends RuntimeException {
    * remote source. */
   protected final int status_code;
   
-  /** An optional list of exceptions thrown. */
-  protected final List<Exception> exceptions;
+  /** An optional list of throwables thrown. */
+  protected final List<Throwable> throwables;
   
   /**
    * Default ctor that sets a message describing this exception.
@@ -50,52 +53,55 @@ public class QueryExecutionException extends RuntimeException {
    * @param status_code An optional status code reflecting the error state.
    * @param order An optional order for the result in a set of slices.
    */
-  public QueryExecutionException(final String msg, 
-                                 final int status_code, 
+  public QueryExecutionException(final String msg,
+                                 final int status_code,
                                  final int order) {
-    this(msg, status_code, order, (Exception) null);
+    super(msg);
+    this.status_code = status_code;
+    this.order = order;
+    this.throwables = null;
+  }
+
+  /**
+   * Ctor that sets a descriptive message, order and status code.
+   * @param msg A non-null message to be given.
+   * @param status_code An optional status code reflecting the error state.
+   * @param throwables An optional list of throwables. May be null or empty.
+   */
+  public QueryExecutionException(final String msg, 
+                                 final int status_code,
+                                 final List<Throwable> throwables) {
+    this(msg, status_code, -1, throwables);
   }
   
   /**
    * Ctor that sets a descriptive message, order and status code.
    * @param msg A non-null message to be given.
    * @param status_code An optional status code reflecting the error state.
-   * @param exceptions An optional list of exceptions. May be null or empty.
+   * @param t The original exception that caused this to be thrown.
    */
   public QueryExecutionException(final String msg, 
                                  final int status_code,
-                                 final List<Exception> exceptions) {
-    this(msg, status_code, -1, exceptions);
-  }
-  
-  /**
-   * Ctor that sets a descriptive message, order and status code.
-   * @param msg A non-null message to be given.
-   * @param status_code An optional status code reflecting the error state.
-   * @param e The original exception that caused this to be thrown.
-   */
-  public QueryExecutionException(final String msg, 
-                                 final int status_code,
-                                 final Exception e) {
-    this(msg, status_code, -1, e);
+                                 final Throwable t) {
+    this(msg, status_code, -1, t);
   }
   
   /**
    * Ctor that takes a descriptive message, order, status_code and optional list
-   * of exceptions that triggered this.
+   * of throwables that triggered this.
    * @param msg A non-null message to be given.
    * @param status_code An optional status code reflecting the error state.
    * @param order An optional order for the result in a set of slices.
-   * @param exceptions An optional list of exceptions. May be null or empty.
+   * @param throwables An optional list of throwables. May be null or empty.
    */
   public QueryExecutionException(final String msg, 
                                  final int status_code, 
                                  final int order,
-                                 final List<Exception> exceptions) {
+                                 final List<Throwable> throwables) {
     super(msg);
     this.status_code = status_code;
     this.order = order;
-    this.exceptions = exceptions;
+    this.throwables = throwables;
   }
   
   /**
@@ -103,16 +109,16 @@ public class QueryExecutionException extends RuntimeException {
    * @param msg A non-null message to be given.
    * @param status_code An optional status code reflecting the error state.
    * @param order An optional order for the result in a set of slices.
-   * @param e The original exception that caused this to be thrown.
+   * @param t The original exception that caused this to be thrown.
    */
   public QueryExecutionException(final String msg, 
                                  final int status_code, 
                                  final int order,
-                                 final Exception e) {
-    super(msg, e);
+                                 final Throwable t) {
+    super(msg, t);
     this.status_code = status_code;
     this.order = order;
-    exceptions = null;
+    this.throwables = null;
   }
   
   /** @return The slice order if pertaining to a sliced query. */
@@ -125,10 +131,10 @@ public class QueryExecutionException extends RuntimeException {
     return status_code;
   }
 
-  /** @return A list of exceptions that triggered this or an empty list. */
-  public List<Exception> getExceptions() {
-    return exceptions == null ? Collections.<Exception>emptyList() : 
-      Collections.<Exception>unmodifiableList(exceptions);
+  /** @return A list of throwables that triggered this or an empty list. */
+  public List<Throwable> getThrowables() {
+    return throwables == null ? Collections.emptyList() :
+      Collections.unmodifiableList(throwables);
   }
 
   @Override
@@ -137,13 +143,13 @@ public class QueryExecutionException extends RuntimeException {
         .append(getClass())
         .append(": ")
         .append(getMessage());
-    if (exceptions != null) {
+    if (throwables != null) {
       buf.append(" subExceptions[");
-      for (int i = 0; i < exceptions.size(); i++) {
+      for (int i = 0; i < throwables.size(); i++) {
         if (i > 0) {
           buf.append(", ");
         }
-        buf.append(exceptions.get(i).toString());
+        buf.append(throwables.get(i).toString());
       }
       buf.append("]");
     }

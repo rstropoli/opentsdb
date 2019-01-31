@@ -1,197 +1,147 @@
 // This file is part of OpenTSDB.
-// Copyright (C) 2014-2017  The OpenTSDB Authors.
+// Copyright (C) 2018  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.data.types.numeric;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import org.junit.Before;
 import org.junit.Test;
 
-import net.opentsdb.data.MillisecondTimeStamp;
-import net.opentsdb.data.SimpleStringTimeSeriesId;
-import net.opentsdb.data.TimeSeriesId;
-import net.opentsdb.data.TimeSeriesValue;
-import net.opentsdb.data.TimeStamp;
-
-/**
- * Tests {@link MutableNumericType}.
- */
 public class TestMutableNumericType {
-  private SimpleStringTimeSeriesId id;
-  private MillisecondTimeStamp ts;
-  
-  @Before
-  public void before() {
-    id = SimpleStringTimeSeriesId.newBuilder().setAlias("mydp").build();
-    ts = new MillisecondTimeStamp(1);
-  }
-  
+
   @Test
   public void ctors() throws Exception {
-    MutableNumericType dp = new MutableNumericType(id);
-    assertSame(id, dp.id());
-    assertEquals(0, dp.timestamp().epoch());
-    assertTrue(dp.isInteger());
-    assertEquals(0, dp.longValue());
-    assertEquals(0, dp.realCount());
-    
-    dp = new MutableNumericType(id, ts, 42);
-    assertSame(id, dp.id());
-    assertNotSame(ts, dp.timestamp());
-    assertEquals(1, dp.timestamp().msEpoch());
-    assertTrue(dp.isInteger());
-    assertEquals(42, dp.longValue());
-    assertEquals(0, dp.realCount());
-    
-    dp = new MutableNumericType(id, ts, 42.5);
-    assertSame(id, dp.id());
-    assertNotSame(ts, dp.timestamp());
-    assertEquals(1, dp.timestamp().msEpoch());
+    MutableNumericType dp = new MutableNumericType();
     assertFalse(dp.isInteger());
-    assertEquals(42.5, dp.doubleValue(), 0.001);
-    assertEquals(0, dp.realCount());
+    assertTrue(Double.isNaN(dp.doubleValue()));
+    assertTrue(Double.isNaN(dp.toDouble()));
+    try {
+      dp.longValue();
+      fail("Expected ClassCastException");
+    } catch (ClassCastException e) { }
     
-    dp = new MutableNumericType(id, ts, 42, 1);
-    assertSame(id, dp.id());
-    assertNotSame(ts, dp.timestamp());
-    assertEquals(1, dp.timestamp().msEpoch());
+    dp = new MutableNumericType(42);
     assertTrue(dp.isInteger());
     assertEquals(42, dp.longValue());
-    assertEquals(1, dp.realCount());
+    assertEquals(42, dp.toDouble(), 0.001);
+    try {
+      dp.doubleValue();
+      fail("Expected ClassCastException");
+    } catch (ClassCastException e) { }
     
-    dp = new MutableNumericType(id, ts, 42.5, 1);
-    assertSame(id, dp.id());
-    assertNotSame(ts, dp.timestamp());
-    assertEquals(1, dp.timestamp().msEpoch());
+    dp = new MutableNumericType(42.5);
     assertFalse(dp.isInteger());
     assertEquals(42.5, dp.doubleValue(), 0.001);
-    assertEquals(1, dp.realCount());
+    assertEquals(42.5, dp.toDouble(), 0.001);
+    try {
+      dp.longValue();
+      fail("Expected ClassCastException");
+    } catch (ClassCastException e) { }
+    assertEquals("42.5", dp.toString());
     
-    dp = new MutableNumericType(dp);
-    assertSame(id, dp.id());
-    assertNotSame(ts, dp.timestamp());
-    assertEquals(1, dp.timestamp().msEpoch());
-    assertFalse(dp.isInteger());
-    assertEquals(42.5, dp.doubleValue(), 0.001);
-    assertEquals(1, dp.realCount());
-    
-    assertEquals(NumericType.TYPE, dp.type());
+    MutableNumericType copy = new MutableNumericType(dp);
+    assertFalse(copy.isInteger());
+    assertEquals(42.5, copy.doubleValue(), 0.001);
+    assertEquals(42.5, copy.toDouble(), 0.001);
+    try {
+      copy.longValue();
+      fail("Expected ClassCastException");
+    } catch (ClassCastException e) { }
+    assertEquals("42.5", copy.toString());
     
     try {
-      new MutableNumericType((TimeSeriesId) null);
+      new MutableNumericType(null);
       fail("Expected IllegalArgumentException");
     } catch (IllegalArgumentException e) { }
-    
-    try {
-      new MutableNumericType((TimeSeriesId) null, ts, 42);
-      fail("Expected IllegalArgumentException");
-    } catch (IllegalArgumentException e) { }
-    
-    try {
-      new MutableNumericType((TimeSeriesId) null, ts, 42.5);
-      fail("Expected IllegalArgumentException");
-    } catch (IllegalArgumentException e) { }
-    
-    try {
-      new MutableNumericType((TimeSeriesId) null, ts, 42, 1);
-      fail("Expected IllegalArgumentException");
-    } catch (IllegalArgumentException e) { }
-    
-    try {
-      new MutableNumericType((TimeSeriesId) null, ts, 42.5, 1);
-      fail("Expected IllegalArgumentException");
-    } catch (IllegalArgumentException e) { }
-    
-    try {
-      new MutableNumericType(id, null, 42);
-      fail("Expected IllegalArgumentException");
-    } catch (IllegalArgumentException e) { }
-    
-    try {
-      new MutableNumericType(id, null, 42.5);
-      fail("Expected IllegalArgumentException");
-    } catch (IllegalArgumentException e) { }
-    
-    try {
-      new MutableNumericType(id, null, 42, 1);
-      fail("Expected IllegalArgumentException");
-    } catch (IllegalArgumentException e) { }
-    
-    try {
-      new MutableNumericType(id, null, 42.5, 1);
-      fail("Expected IllegalArgumentException");
-    } catch (IllegalArgumentException e) { }
-    
-    try {
-      new MutableNumericType((TimeSeriesValue<NumericType>) null);
-      fail("Expected IllegalArgumentException");
-    } catch (IllegalArgumentException e) { }
-  }
-
-  @Test
-  public void getCopy() throws Exception {
-    final MutableNumericType dp = new MutableNumericType(id, ts, 42.5, 1);
-    final TimeSeriesValue<NumericType> copy = dp.getCopy();
-    assertSame(id, copy.id());
-    assertNotSame(ts, copy.timestamp());
-    assertEquals(1, copy.timestamp().msEpoch());
-    assertFalse(copy.value().isInteger());
-    assertEquals(42.5, copy.value().doubleValue(), 0.001);
-    assertEquals(1, copy.realCount());
   }
   
   @Test
-  public void reset() throws Exception {
-    final MutableNumericType dp = new MutableNumericType(id, ts, 42.5, 1);
+  public void set() throws Exception {
+    MutableNumericType dp = new MutableNumericType();
+    assertFalse(dp.isInteger());
+    assertTrue(Double.isNaN(dp.doubleValue()));
+    assertTrue(Double.isNaN(dp.toDouble()));
+    try {
+      dp.longValue();
+      fail("Expected ClassCastException");
+    } catch (ClassCastException e) { }
     
-    TimeStamp ts2 = new MillisecondTimeStamp(2);
-    dp.reset(ts2, 42, 0);
-    assertSame(id, dp.id());
-    assertNotSame(ts, dp.timestamp());
-    assertEquals(2, dp.timestamp().msEpoch());
+    dp.set(0);
+    assertTrue(dp.isInteger());
+    assertEquals(0, dp.longValue());
+    assertEquals(0, dp.toDouble(), 0.001);
+    try {
+      dp.doubleValue();
+      fail("Expected ClassCastException");
+    } catch (ClassCastException e) { }
+    assertEquals("0", dp.toString());
+    
+    dp.set(42.5);
+    assertFalse(dp.isInteger());
+    assertEquals(42.5, dp.doubleValue(), 0.001);
+    assertEquals(42.5, dp.toDouble(), 0.001);
+    try {
+      dp.longValue();
+      fail("Expected ClassCastException");
+    } catch (ClassCastException e) { }
+    assertEquals("42.5", dp.toString());
+    
+    dp.set(Long.MAX_VALUE);
+    assertTrue(dp.isInteger());
+    assertEquals(Long.MAX_VALUE, dp.longValue());
+    assertEquals(Long.MAX_VALUE, dp.toDouble(), 0.001);
+    try {
+      dp.doubleValue();
+      fail("Expected ClassCastException");
+    } catch (ClassCastException e) { }
+    
+    dp.set(Double.MIN_VALUE);
+    assertFalse(dp.isInteger());
+    assertEquals(Double.MIN_VALUE, dp.doubleValue(), 0.001);
+    assertEquals(Double.MIN_VALUE, dp.toDouble(), 0.001);
+    try {
+      dp.longValue();
+      fail("Expected ClassCastException");
+    } catch (ClassCastException e) { }
+    
+    MutableNumericType other = new MutableNumericType();
+ 
+    dp.set(other);
+    assertFalse(dp.isInteger());
+    assertTrue(Double.isNaN(dp.doubleValue()));
+    assertTrue(Double.isNaN(dp.toDouble()));
+    try {
+      dp.longValue();
+      fail("Expected ClassCastException");
+    } catch (ClassCastException e) { }
+    
+    other.set(42);
+    dp.set(other);
     assertTrue(dp.isInteger());
     assertEquals(42, dp.longValue());
-    assertEquals(0, dp.realCount());
+    assertEquals(42, dp.toDouble(), 0.001);
+    try {
+      dp.doubleValue();
+      fail("Expected ClassCastException");
+    } catch (ClassCastException e) { }
     
-    ts2 = new MillisecondTimeStamp(3);
-    dp.reset(ts2, 24.5, 3);
-    assertSame(id, dp.id());
-    assertNotSame(ts, dp.timestamp());
-    assertEquals(3, dp.timestamp().msEpoch());
-    assertFalse(dp.isInteger());
-    assertEquals(24.5, dp.doubleValue(), 0.001);
-    assertEquals(3, dp.realCount());
-    
-    final MutableNumericType dupe = new MutableNumericType(id);
-    assertSame(id, dupe.id());
-    assertNotSame(ts, dupe.timestamp());
-    assertEquals(0, dupe.timestamp().msEpoch());
-    assertTrue(dupe.isInteger());
-    assertEquals(0, dupe.longValue());
-    assertEquals(0, dupe.realCount());
-    
-    dupe.reset(dp);
-    assertSame(id, dupe.id());
-    assertNotSame(ts, dupe.timestamp());
-    assertEquals(3, dupe.timestamp().msEpoch());
-    assertFalse(dupe.isInteger());
-    assertEquals(24.5, dupe.doubleValue(), 0.001);
-    assertEquals(3, dupe.realCount());
+    try {
+      dp.set(null);
+      fail("Expected NullPointerException");
+    } catch (NullPointerException e) { }
   }
-
 }

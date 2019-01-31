@@ -1,15 +1,17 @@
 // This file is part of OpenTSDB.
 // Copyright (C) 2015-2017  The OpenTSDB Authors.
 //
-// This program is free software: you can redistribute it and/or modify it
-// under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 2.1 of the License, or (at your
-// option) any later version.  This program is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty
-// of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser
-// General Public License for more details.  You should have received a copy
-// of the GNU Lesser General Public License along with this program.  If not,
-// see <http://www.gnu.org/licenses/>.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package net.opentsdb.query.pojo;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -23,17 +25,43 @@ import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ComparisonChain;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.google.common.collect.Ordering;
+import com.google.common.collect.Sets;
 import com.google.common.hash.HashCode;
+import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
 
+import net.opentsdb.configuration.Configuration;
 import net.opentsdb.core.Const;
+import net.opentsdb.core.TSDB;
 import net.opentsdb.data.TimeSeriesGroupId;
+import net.opentsdb.data.types.numeric.NumericType;
+import net.opentsdb.query.QueryMode;
+import net.opentsdb.query.QueryNodeConfig;
+import net.opentsdb.query.DefaultTimeSeriesDataSourceConfig;
+import net.opentsdb.query.SemanticQuery;
+import net.opentsdb.query.QueryFillPolicy.FillWithRealPolicy;
+import net.opentsdb.query.filter.ChainFilter;
+import net.opentsdb.query.filter.ExplicitTagsFilter;
+import net.opentsdb.query.filter.MetricLiteralFilter;
+import net.opentsdb.query.filter.QueryFilter;
+import net.opentsdb.query.filter.TagValueLiteralOrFilter;
+import net.opentsdb.query.filter.TagValueRegexFilter;
+import net.opentsdb.query.filter.TagValueWildcardFilter;
+import net.opentsdb.query.interpolation.types.numeric.NumericInterpolatorConfig;
+import net.opentsdb.query.joins.JoinConfig;
+import net.opentsdb.query.joins.JoinConfig.JoinType;
+import net.opentsdb.query.processor.downsample.DownsampleConfig;
+import net.opentsdb.query.processor.expressions.ExpressionConfig;
+import net.opentsdb.query.processor.expressions.ExpressionParser;
+import net.opentsdb.query.processor.groupby.GroupByConfig;
 import net.opentsdb.utils.JSON;
 
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -43,7 +71,11 @@ import java.util.Set;
 @JsonInclude(Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonDeserialize(builder = TimeSeriesQuery.Builder.class)
-public class TimeSeriesQuery extends Validatable implements Comparable<TimeSeriesQuery> {
+public class TimeSeriesQuery extends Validatable 
+    implements Comparable<TimeSeriesQuery>{
+  
+  public static final String RATE_1_TO_RESET_KEY = "tsd.query.convert.2x.rate1toReset";
+  
   /** An optional name for the query */
   private String name;
   
@@ -52,6 +84,9 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
   
   /** A list of filters */
   private List<Filter> filters;
+  
+  /** A mapping of the filters for key/value access. */
+  private Map<String, Filter> filter_map;
   
   /** A list of metrics */
   private List<Metric> metrics;
@@ -72,6 +107,9 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
   /** TODO - temp: A list for creating a query graph. */
   private List<TimeSeriesQuery> sub_queries;
   
+  /** TEMP - try to find a better way. Holds a list of key/value settings. */
+  private Map<String, String> config;
+  
   /**
    * Default ctor
    * @param builder The builder to pull values from
@@ -84,6 +122,14 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
     this.expressions = builder.expressions;
     this.outputs = builder.outputs;
     this.order = builder.order;
+    this.config = builder.config;
+    
+    if (builder.filters != null) {
+      filter_map = Maps.newHashMapWithExpectedSize(filters.size());
+      for (final Filter filter : filters) {
+        filter_map.put(filter.getId(), filter);
+      }
+    }
   }
 
   /** @return an optional name for the query */
@@ -101,6 +147,23 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
     return filters == null ? null : Collections.unmodifiableList(filters);
   }
 
+  /**
+   * Fetches the given filter ID from the map if it exists.
+   * @param id A non-null and non-empty filter Id.
+   * @return Null if no filters were set or the filter ID exists, the filter if
+   * present.
+   */
+  @JsonIgnore
+  public Filter getFilter(final String id) {
+    if (Strings.isNullOrEmpty(id)) {
+      throw new IllegalArgumentException("Filter ID cannot be null or empty.");
+    }
+    if (filter_map == null) {
+      return null;
+    }
+    return filter_map.get(id);
+  }
+  
   /** @return a list of metrics */
   public List<Metric> getMetrics() {
     return metrics == null ? null : Collections.unmodifiableList(metrics);
@@ -159,12 +222,12 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
   /** Validates the query
    * @throws IllegalArgumentException if one or more parameters were invalid
    */
-  public void validate() {
+  public void validate(final TSDB tsdb) {
     if (time == null) {
       throw new IllegalArgumentException("missing time");
     }
 
-    validatePOJO(time, "time");
+    validatePOJO(tsdb, time, "time");
 
     if (metrics == null || metrics.isEmpty()) {
       throw new IllegalArgumentException("missing or empty metrics");
@@ -201,33 +264,33 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
       }
     }
 
-    validateCollection(metrics, "metric");
+    validateCollection(tsdb, metrics, "metric");
 
     if (filters != null) {
-      validateCollection(filters, "filter");
+      validateCollection(tsdb, filters, "filter");
     }
 
     if (expressions != null) {
-      validateCollection(expressions, "expression");
+      validateCollection(tsdb, expressions, "expression");
     }
 
     validateFilters();
     
     if (expressions != null) {
-      validateCollection(expressions, "expression");
-      for (final Expression exp : expressions) {
-        if (exp.getVariables() == null) {
-          throw new IllegalArgumentException("No variables found for an "
-              + "expression?! " + JSON.serializeToString(exp));
-        }
-        
-        for (final String var : exp.getVariables()) {
-          if (!variable_ids.contains(var)) {
-            throw new IllegalArgumentException("Expression [" + exp.getExpr() 
-              + "] was missing input " + var);
-          }
-        }
-      }
+//      validateCollection(expressions, "expression");
+//      for (final Expression exp : expressions) {
+//        if (exp.getVariables() == null) {
+//          throw new IllegalArgumentException("No variables found for an "
+//              + "expression?! " + JSON.serializeToString(exp));
+//        }
+//        
+//        for (final String var : exp.getVariables()) {
+//          if (!variable_ids.contains(var)) {
+//            throw new IllegalArgumentException("Expression [" + exp.getExpr() 
+//              + "] was missing input " + var);
+//          }
+//        }
+//      }
     }
   }
 
@@ -292,7 +355,8 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
         && Objects.equal(query.metrics, metrics)
         && Objects.equal(query.name, name)
         && Objects.equal(query.outputs, outputs)
-        && Objects.equal(query.time, time);
+        && Objects.equal(query.time, time)
+        && Objects.equal(query.config,  config);
   }
 
   @Override
@@ -310,7 +374,8 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
             (filters != null ? filters.size() : 0) + 
             metrics.size() +
             (expressions != null ? expressions.size() : 0) +
-            (outputs != null ? outputs.size() : 0));
+            (outputs != null ? outputs.size() : 0) + 
+            (config != null ? config.size() : 0));
     hashes.add(local_hc);
     if (time != null) {
       hashes.add(time.buildHashCode());
@@ -332,6 +397,15 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
       for (final Output output : outputs) {
         hashes.add(output.buildHashCode());
       }
+    }
+    if (config != null) {
+      final List<String> keys = Lists.newArrayList(config.keySet());
+      Collections.sort(keys);
+      final Hasher hasher = Const.HASH_FUNCTION().newHasher();
+      for (final String key : keys) {
+        hasher.putString(key + config.get(key), Const.UTF8_CHARSET);
+      }
+      hashes.add(hasher.hash());
     }
     return Hashing.combineOrdered(hashes);
   }
@@ -375,18 +449,31 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
   
   @Override
   public int compareTo(final TimeSeriesQuery o) {
-    return ComparisonChain.start()
-        .compare(name, o.name, Ordering.natural().nullsFirst())
-        .compare(time, o.time, Ordering.natural().nullsFirst())
-        .compare(filters, o.filters, 
+    if (!(o instanceof TimeSeriesQuery)) {
+      return -1;
+    }
+    ComparisonChain chain = ComparisonChain.start()
+        .compare(name, ((TimeSeriesQuery) o).name, Ordering.natural().nullsFirst())
+        .compare(time, ((TimeSeriesQuery) o).time, Ordering.natural().nullsFirst())
+        .compare(filters, ((TimeSeriesQuery) o).filters, 
             Ordering.<Filter>natural().lexicographical().nullsFirst())
-        .compare(metrics, o.metrics, 
+        .compare(metrics, ((TimeSeriesQuery) o).metrics, 
             Ordering.<Metric>natural().lexicographical().nullsFirst())
-        .compare(expressions, o.expressions, 
+        .compare(expressions, ((TimeSeriesQuery) o).expressions, 
             Ordering.<Expression>natural().lexicographical().nullsFirst())
-        .compare(outputs, o.outputs, 
-            Ordering.<Output>natural().lexicographical().nullsFirst())
-        .result();
+        .compare(outputs, ((TimeSeriesQuery) o).outputs, 
+            Ordering.<Output>natural().lexicographical().nullsFirst());
+    if (config != null) {
+      final List<String> keys = Lists.newArrayList(config.keySet());
+      Collections.sort(keys);
+      for (final String key : keys) {
+        chain = chain.compare(config.get(key), 
+            ((TimeSeriesQuery) o).config == null ? 
+                null : ((TimeSeriesQuery) o).config.get(key), 
+                  Ordering.natural().nullsFirst());
+      }
+    }
+    return chain.result();
   }
   
   @Override
@@ -414,6 +501,377 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
       Collections.unmodifiableList(sub_queries);
   }
   
+  public Map<String, String> getConfig() {
+    return config;
+  }
+  
+  /**
+   * Retrieve a query-time override as a string.
+   * @param config A non-null config object.
+   * @param key The non-null and non-empty key.
+   * @return The string or null if not set anywhere.
+   */
+  public String getString(final Configuration config, final String key) {
+    if (config == null) {
+      throw new IllegalArgumentException("Config cannot be null");
+    }
+    if (Strings.isNullOrEmpty(key)) {
+      throw new IllegalArgumentException("Key cannot be null or empty.");
+    }
+    String value = this.config == null ? null : this.config.get(key);
+    if (Strings.isNullOrEmpty(value)) {
+      if (config.hasProperty(key)) {
+        return config.getString(key);
+      }
+    }
+    return value;
+  }
+  
+  /**
+   * Retrieve a query-time override as an integer.
+   * @param config A non-null config object.
+   * @param key The non-null and non-empty key.
+   * @return The string or null if not set anywhere.
+   */
+  public int getInt(final Configuration config, final String key) {
+    if (config == null) {
+      throw new IllegalArgumentException("Config cannot be null");
+    }
+    if (Strings.isNullOrEmpty(key)) {
+      throw new IllegalArgumentException("Key cannot be null or empty.");
+    }
+    String value = this.config == null ? null : this.config.get(key);
+    if (Strings.isNullOrEmpty(value)) {
+      if (config.hasProperty(key)) {
+        return config.getInt(key);
+      }
+      throw new IllegalArgumentException("No value for key '" + key + "'");
+    }
+    return Integer.parseInt(value);
+  }
+  
+  /**
+   * Retrieve a query-time override as a boolean. Only 'true', '1' or 'yes'
+   * are considered true.
+   * @param config A non-null config object.
+   * @param key The non-null and non-empty key.
+   * @return The string or null if not set anywhere.
+   */
+  public boolean getBoolean(final Configuration config, final String key) {
+    if (config == null) {
+      throw new IllegalArgumentException("Config cannot be null");
+    }
+    if (Strings.isNullOrEmpty(key)) {
+      throw new IllegalArgumentException("Key cannot be null or empty.");
+    }
+    String value = this.config == null ? null : this.config.get(key);
+    if (Strings.isNullOrEmpty(value)) {
+      if (config.hasProperty(key)) {
+        return config.getBoolean(key);
+      }
+      throw new IllegalArgumentException("No value for key '" + key + "'");
+    }
+    value = value.toLowerCase();
+    return value.equals("true") || value.equals("1") || value.equals("yes");
+  }
+  
+  /**
+   * Whether or not the key is present in the map, may have a null value.
+   * @param key The non-null and non-empty key.
+   * @return True if the key is present.
+   */
+  public boolean hasKey(final String key) {
+    if (Strings.isNullOrEmpty(key)) {
+      throw new IllegalArgumentException("Key cannot be null or empty.");
+    }
+    return config == null ? false : config.containsKey(key);
+  }
+  
+  /**
+   * Converts the query into a semantic query builder. 
+   * @param tsdb The TSDB to pull configs from.
+   * @return A non-null builder if successful.
+   */
+  public SemanticQuery.Builder convert(final TSDB tsdb) {
+    validate(tsdb);
+    
+    final SemanticQuery.Builder builder = SemanticQuery.newBuilder()
+        .setStart(time.getStart())
+        .setEnd(time.getEnd())
+        .setTimeZone(time.getTimezone())
+        .setMode(QueryMode.SINGLE);
+    
+    final Map<String, QueryFilter> filter_map = Maps.newHashMap();
+    if (filters != null) {
+      for (final Filter filter : filters) {
+        final ChainFilter.Builder chain_builder = ChainFilter.newBuilder();
+        for (final TagVFilter tag_filter : filter.getTags()) {
+          if (tag_filter instanceof TagVLiteralOrFilter) {
+            chain_builder.addFilter(TagValueLiteralOrFilter.newBuilder()
+                .setTagKey(tag_filter.getTagk())
+                .setFilter(tag_filter.getFilter())
+                .build());
+          } else if (tag_filter instanceof TagVWildcardFilter) {
+            chain_builder.addFilter(TagValueWildcardFilter.newBuilder()
+                .setTagKey(tag_filter.getTagk())
+                .setFilter(tag_filter.getFilter())
+                .build());
+          } else if (tag_filter instanceof TagVRegexFilter) {
+            chain_builder.addFilter(TagValueRegexFilter.newBuilder()
+                .setTagKey(tag_filter.getTagk())
+                .setFilter(tag_filter.getFilter())
+                .build());
+          }
+          // TODO - case insensitive
+        }
+        
+        QueryFilter almost_final;
+        if (chain_builder.filtersCount() == 1) {
+          almost_final = chain_builder.filters().get(0);
+        } else {
+          almost_final = chain_builder.build();
+        }
+        
+        if (filter.getExplicitTags()) {
+          filter_map.put(filter.getId(), ExplicitTagsFilter.newBuilder()
+                  .setFilter(almost_final)
+                  .build());
+        } else {
+          filter_map.put(filter.getId(), almost_final);
+        }
+      }
+    }
+    
+    Map<String, String> id_to_node_roots = Maps.newHashMap();
+    
+    final List<QueryNodeConfig> nodes = Lists.newArrayList();
+    int metric_id = 1;
+    for (final Metric metric : metrics) {
+      
+      DefaultTimeSeriesDataSourceConfig.Builder source = 
+          (DefaultTimeSeriesDataSourceConfig.Builder) DefaultTimeSeriesDataSourceConfig.newBuilder()
+      .setMetric(MetricLiteralFilter.newBuilder()
+          .setMetric(metric.getMetric())
+          .build())
+      .setId(Strings.isNullOrEmpty(metric.getId()) ? "m" + metric_id++ : metric.getId());
+      if (!Strings.isNullOrEmpty(metric.getFilter())) {
+        source.setQueryFilter(filter_map.get(metric.getFilter()));
+      }
+      QueryNodeConfig node = source.build();
+      nodes.add(node);
+      
+      final String interpolator;
+      String agg = !Strings.isNullOrEmpty(metric.getAggregator()) ?
+          metric.getAggregator().toLowerCase() : 
+            time.getAggregator().toLowerCase();
+      if (agg.contains("zimsum") || 
+          agg.contains("mimmax") ||
+          agg.contains("mimmin")) {
+        interpolator = null;
+      } else {
+        interpolator = "LERP";
+      }
+      
+      // downsampler
+      final Downsampler downsampler = metric.getDownsampler() != null ? 
+          metric.getDownsampler() : time.getDownsampler();
+      if (downsampler != null) {
+        node = downsampler(metric, interpolator, downsampler);
+        nodes.add(node);
+      }
+      
+      if (metric.isRate()) {
+        node = rate(metric, metric.getRateOptions(), node, tsdb);
+        nodes.add(node);
+      } else if (time.isRate()) {
+        node = rate(metric, time.getRateOptions(), node, tsdb);
+        nodes.add(node);
+      }
+      
+      final Filter filter = Strings.isNullOrEmpty(metric.getFilter()) ? null 
+          : getFilter(metric.getFilter());
+      QueryNodeConfig gb = groupBy(metric, interpolator, downsampler, filter, node);
+      if (gb != null) {
+        nodes.add(gb);
+        node = gb;
+      }
+      
+      id_to_node_roots.put(metric.getId(), node.getId());
+    }
+    
+    if (expressions != null) {
+      for (final Expression expression : expressions) {
+        
+        final Set<String> variables = ExpressionParser.parseVariables(expression.getExpr());
+        final List<String> vars = Lists.newArrayListWithExpectedSize(variables.size());
+        for (final String var : variables) {
+          vars.add(id_to_node_roots.get(var));
+        }
+        
+        // TODO - figure out query tags to mimic 2.x
+        // TODO - get fills from metrics
+        QueryNodeConfig node = ExpressionConfig.newBuilder()
+            .setExpression(expression.getExpr())
+            //.setAs("") // TODO ??
+            .setJoinConfig((JoinConfig) JoinConfig.newBuilder()
+                .setJoinType(JoinType.NATURAL)
+                .build())
+            .addInterpolatorConfig(NumericInterpolatorConfig.newBuilder()
+                .setFillPolicy(FillPolicy.NONE) // TODO
+                .setRealFillPolicy(FillWithRealPolicy.NONE)
+                .setType("LERP")
+                .setDataType(NumericType.TYPE.toString())
+                .build())
+            .setSources(vars)
+            .setId(expression.getId())
+            .build();
+        nodes.add(node);
+      }
+    }
+    
+    builder.setExecutionGraph(nodes);
+    return builder;
+  }
+  
+  /**
+   * Helper to build the downsampler node.
+   * @param metric A non-null metric.
+   * @param interpolator The name of the interpolator to use based on 
+   * the aggegation.
+   * @param downsampler The downsampler to pull config from.
+   * @return An execution graph node.
+   */
+  private QueryNodeConfig downsampler(final Metric metric, 
+                                      final String interpolator, 
+                                      final Downsampler downsampler) {
+    
+    FillPolicy policy = downsampler.getFillPolicy().getPolicy();
+    
+    DownsampleConfig.Builder ds = (DownsampleConfig.Builder) DownsampleConfig.newBuilder()
+        .setAggregator(downsampler.getAggregator())
+        .setInterval(downsampler.getInterval())
+        .setFill(policy != null && policy != FillPolicy.NONE)
+        .setId("downsample_" + metric.getId())
+        .addInterpolatorConfig(NumericInterpolatorConfig.newBuilder()
+                  .setFillPolicy(policy)
+                  .setRealFillPolicy(FillWithRealPolicy.NONE)
+                  .setType(interpolator)
+                  .setDataType(NumericType.TYPE.toString())
+                  .build())
+        .addSource(metric.getId());
+    if (!Strings.isNullOrEmpty(downsampler.getTimezone())) {
+      ds.setTimeZone(downsampler.getTimezone());
+    }
+        
+    return ds.build();
+  }
+  
+  /**
+   * Generates a rate node.
+   * @param metric The non-null metric.
+   * @param options The rate options.
+   * @param parent The parent node.
+   * @param tsdb The TSDB to pull configs from.
+   * @return An execution graph node.
+   */
+  private QueryNodeConfig rate(final Metric metric, 
+                               final RateOptions options, 
+                               final QueryNodeConfig parent,
+                               final TSDB tsdb) {
+    if (!tsdb.getConfig().hasProperty(RATE_1_TO_RESET_KEY)) {
+      synchronized(tsdb.getConfig()) { 
+        if (!tsdb.getConfig().hasProperty(RATE_1_TO_RESET_KEY)) {
+          tsdb.getConfig().register(RATE_1_TO_RESET_KEY, false, true,
+              "For 2.x queries, if the rate reset value was set to 1 to "
+              + "avoid missbehavior in the past, converts it to the default and "
+              + "sets dropResets for the proper new behvaior.");
+        }
+      }
+    }
+    
+    if (options.getResetValue() == 1 && 
+        tsdb.getConfig().getBoolean(RATE_1_TO_RESET_KEY)) {
+      return RateOptions.newBuilder(metric.getRateOptions())
+          .setResetValue(0)
+          .setDropResets(true)
+          .setId(metric.getId() + "_Rate")
+          .addSource(parent.getId())
+          .build();
+    }
+    
+    return RateOptions.newBuilder(metric.getRateOptions())
+        .setId(metric.getId() + "_Rate")
+        .addSource(parent.getId())
+        .build();
+  }
+  
+  /**
+   * Generates a group-by node.
+   * @param metric A non-null metric.
+   * @param interpolator The name of the interpolator to use based on 
+   * the aggegation.
+   * @param downsampler The downsampler to pull config from.
+   * @param filter An optional filter.
+   * @param parent The parent graph node.
+   * @return An execution graph node.
+   */
+  private QueryNodeConfig groupBy(final Metric metric, 
+                                  final String interpolator, 
+                                  final Downsampler downsampler, 
+                                  final Filter filter, 
+                                  final QueryNodeConfig parent) {
+    final String agg = !Strings.isNullOrEmpty(metric.getAggregator()) ?
+        metric.getAggregator().toLowerCase() : 
+         time.getAggregator().toLowerCase();
+    if (filter != null) {
+      GroupByConfig.Builder gb_config = null;
+      final Set<String> join_keys = Sets.newHashSet();
+      for (TagVFilter v : filter.getTags()) {
+        if (v.isGroupBy()) {
+          if (gb_config == null) {
+            FillPolicy policy = downsampler == null ? 
+                FillPolicy.NONE : downsampler.getFillPolicy().getPolicy();
+            gb_config = (GroupByConfig.Builder) GroupByConfig.newBuilder()
+                .addInterpolatorConfig(NumericInterpolatorConfig.newBuilder()
+                    .setFillPolicy(policy)
+                    .setRealFillPolicy(FillWithRealPolicy.NONE)
+                    .setType(interpolator)
+                    .setDataType(NumericType.TYPE.toString())
+                    .build())
+                .setId(metric.getId() + "_GroupBy");
+          }
+          join_keys.add(v.getTagk());
+        }
+      }
+      
+      if (gb_config != null) {
+        gb_config.setTagKeys(join_keys)
+                 .setAggregator(agg)
+                 .addSource(parent.getId());
+        return gb_config.build();
+      }
+    } else if (!agg.toLowerCase().equals("none")) {
+      // we agg all 
+      FillPolicy policy = downsampler == null ? 
+          FillPolicy.NONE : downsampler.getFillPolicy().getPolicy();
+      GroupByConfig.Builder gb_config = (GroupByConfig.Builder) GroupByConfig.newBuilder()
+          .addInterpolatorConfig(NumericInterpolatorConfig.newBuilder()
+              .setFillPolicy(policy)
+              .setRealFillPolicy(FillWithRealPolicy.NONE)
+              .setType(interpolator)
+              .setDataType(NumericType.TYPE.toString())
+              .build())
+          .setId(metric.getId() + "_GroupBy");
+          
+      gb_config.setAggregator(agg)
+               .addSource(parent.getId());
+      
+      return gb_config.build();
+    }
+    
+    return null;
+  }
+  
   /**
    * A builder for the query component of a query
    */
@@ -434,6 +892,8 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
     private List<Output> outputs;
     @JsonProperty
     private int order;
+    @JsonProperty
+    private Map<String, String> config;
 
     public Builder() { }
 
@@ -575,6 +1035,22 @@ public class TimeSeriesQuery extends Validatable implements Comparable<TimeSerie
     
     public Builder setOrder(final int order) {
       this.order = order;
+      return this;
+    }
+    
+    public Builder setConfig(final Map<String, String> config) {
+      this.config = config;
+      return this;
+    }
+    
+    public Builder addConfig(final String key, final String value) {
+      if (Strings.isNullOrEmpty(key)) {
+        throw new IllegalArgumentException("Key cannot be null.");
+      }
+      if (config == null) {
+        config = Maps.newHashMap();
+      }
+      config.put(key, value);
       return this;
     }
     
