@@ -106,6 +106,9 @@ public class Config {
   /** tsd.core.tree.enable_processing */
   private boolean enable_tree_processing = false;
 
+  /** tsd.query.downsample.use_calendar */
+  private boolean use_calendar = false;
+  
   /** tsd.storage.hbase.scanner.maxNumRows */
   private int scanner_max_num_rows = 128;
   
@@ -302,6 +305,13 @@ public class Config {
 
   public boolean use_max_value() {
     return use_max_value;
+  }
+
+  /** @return whether or not to align to the Gregorian calendar when downsampling a 
+   *  		  daily, weekly, monthly, or yearly interval
+   */
+  public boolean use_calendar() {
+	  return use_calendar;
   }
   
   /**
@@ -621,6 +631,7 @@ public class Config {
     default_map.put("tsd.storage.use_otsdb_timestamp", "false");
     default_map.put("tsd.storage.use_max_value", "true");
     default_map.put("tsd.storage.get_date_tiered_compaction_start", "0");
+    default_map.put("tsd.query.downsample.use_calendar", "false");
 
     for (Map.Entry<String, String> entry : default_map.entrySet()) {
       if (!properties.containsKey(entry.getKey()))
@@ -736,6 +747,7 @@ public class Config {
     }
     enable_tree_processing = this.getBoolean("tsd.core.tree.enable_processing");
     fix_duplicates = this.getBoolean("tsd.storage.fix_duplicates");
+    use_calendar = this.getBoolean("tsd.query.downsample.use_calendar");
     scanner_max_num_rows = this.getInt("tsd.storage.hbase.scanner.maxNumRows");
     use_otsdb_timestamp = this.getBoolean("tsd.storage.use_otsdb_timestamp");
     get_date_tiered_compaction_start = this.getLong("tsd.storage.get_date_tiered_compaction_start");
