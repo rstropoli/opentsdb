@@ -50,3 +50,10 @@ tools/docker/opentsdb.conf
 fat-jar-pom.xml
 src-resources/
 test-resources/
+
+*.jar
+build-aux/fetchdep.sh
+config.status.old
+opentsdb.conf
+opentsdb.spec
+src/net/
