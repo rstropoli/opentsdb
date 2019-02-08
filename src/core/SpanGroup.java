@@ -24,6 +24,7 @@ import java.util.Set;
 import org.hbase.async.Bytes;
 import org.hbase.async.Bytes.ByteMap;
 
+import com.esotericsoftware.minlog.Log;
 import com.stumbleupon.async.Callback;
 import com.stumbleupon.async.Deferred;
 
@@ -306,6 +307,8 @@ final class SpanGroup implements DataPoints {
     final long end = (end_time & Const.SECOND_MASK) == 0 ? 
         end_time * 1000 : end_time;
 
+    Log.info("RJS --> Adding Span Group " + span.size() + " entries ");
+    
     if (span.size() == 0) {
       // copy annotations that are in the time range
       for (Annotation annot : span.getAnnotations()) {

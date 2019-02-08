@@ -256,6 +256,9 @@ public class QueryExecutor {
         throws Exception {
         
         for (int i = 0; i < query_results.size(); i++) {
+        	
+          LOG.info("RJS --> QueriesCB received " + query_results.get(i)[0].size() + " points");
+          
           final TSSubQuery sub = ts_query.getQueries().get(i);
           
           Iterator<Entry<String, TSSubQuery>> it = sub_queries.entrySet().iterator();

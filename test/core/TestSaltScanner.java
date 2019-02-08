@@ -420,7 +420,7 @@ public class TestSaltScanner extends BaseTsdbTest {
     filters.add(new TagVWildcardFilter(TAGK_STRING, "web*"));
     
     final SaltScanner scanner = new SaltScanner(tsdb, METRIC_BYTES, scanners, 
-        spans, null, false, null, null, 0, null, 0, 1);
+        spans, null, false, null, null, 0, null, 0, 1, false);
     try {
       scanner.scan().joinUninterruptibly();
       fail("Excpected a QueryException");
@@ -436,7 +436,7 @@ public class TestSaltScanner extends BaseTsdbTest {
     filters.add(new TagVWildcardFilter(TAGK_STRING, "web*"));
     
     final SaltScanner scanner = new SaltScanner(tsdb, METRIC_BYTES, scanners, 
-        spans, null, false, null, null, 0, null, 2, 0);
+        spans, null, false, null, null, 0, null, 2, 0, false);
     try {
       scanner.scan().joinUninterruptibly();
       fail("Excpected a QueryException");

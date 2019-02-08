@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import net.opentsdb.meta.Annotation;
+import net.opentsdb.query.QueryUtil;
 import net.opentsdb.query.filter.TagVFilter;
 import net.opentsdb.rollup.RollupQuery;
 import net.opentsdb.rollup.RollupSpan;
@@ -145,6 +146,11 @@ public class SaltScanner {
   private volatile Exception exception;
   
   /**
+   * A flag to indicate that the scanner is searching for prior points
+   */
+  private final boolean reverseScan;
+  
+  /**
    * Default ctor that performs some validation. Call {@link scan} after 
    * construction to actually start fetching data.
    * @param tsdb The TSDB to which we belong
@@ -159,7 +165,7 @@ public class SaltScanner {
                                       final List<Scanner> scanners, 
                                       final TreeMap<byte[], Span> spans,
                                       final List<TagVFilter> filters) {
-    this(tsdb, metric, scanners, spans, filters, false, null, null, 0, null, 0, 0);
+    this(tsdb, metric, scanners, spans, filters, false, null, null, 0, null, 0, 0, false);
   }
   
   /**
@@ -192,7 +198,8 @@ public class SaltScanner {
                                       final int query_index,
                                       final TreeMap<byte[], HistogramSpan> histogramSpans,
                                       final long max_bytes,
-                                      final long max_data_points) {
+                                      final long max_data_points,
+                                      final boolean reverseScan ) {
     if (tsdb == null) {
       throw new IllegalArgumentException("The TSDB argument was null.");
     }
@@ -213,7 +220,7 @@ public class SaltScanner {
       throw new IllegalArgumentException("Not enough or too many scanners " + 
           scanners.size() + " when the salt bucket count is " + 
           Const.SALT_BUCKETS());
-    } else if (Const.SALT_WIDTH() <= 0 && scanners.size() > 1) {
+    } else if (Const.SALT_WIDTH() <= 0 && scanners.size() > 2) { // RJS possable two scanners for non-salted, one forward and one backwards
       throw new IllegalArgumentException("Not enough or too many scanners " + 
           scanners.size() + " when the salting is disabled.");
     }
@@ -235,6 +242,7 @@ public class SaltScanner {
     this.rollup_query = rollup_query;
     this.query_stats = query_stats;
     this.query_index = query_index;
+    this.reverseScan = reverseScan;
     countdown = new CountDownLatch(scanners.size());
     if (rollup_query != null && RollupQuery.isValidQuery(rollup_query)) {
       is_rollup = true;
@@ -255,6 +263,8 @@ public class SaltScanner {
     num_data_points = new AtomicLong();
     bytes_fetched = new AtomicLong();
     max_data_points_flag = new AtomicBoolean();
+    
+    LOG.info("RJS --> SaltScanner returning with " + spans.size() + " total spans");
   }
 
   /**
@@ -534,6 +544,7 @@ public class SaltScanner {
     public Object call(final ArrayList<ArrayList<KeyValue>> rows) 
             throws Exception {
       try {
+    	    	
         fetch_time += DateTime.nanoTime() - fetch_start;
         if (rows == null) {
           close(true);
@@ -547,6 +558,8 @@ public class SaltScanner {
           }
           return null;
         }
+
+    	LOG.info("RJS --> ScannerCb " + rows.size() + "found isReversed = " + scanner.isReversed() );
 
         // used for UID resolution if a filter is involved
         final List<Deferred<Object>> lookups = 
@@ -633,10 +646,11 @@ public class SaltScanner {
                 qlength = Internal.getQualifierLength(kv.value(), idx);
                 idx += qlength + Internal.getValueLengthFromQualifier(kv.value(), idx);
                 ++dps_pre_filter;
+                
               }
             }
           }
-          
+
           // If any filters have made it this far then we need to resolve
           // the row key UIDs to their names for string comparison. We'll
           // try to avoid the resolution with some sets but we may dupe
@@ -713,6 +727,12 @@ public class SaltScanner {
           }
           return Deferred.group(lookups).addCallback(new GroupCB());
         } else {
+        	// if reverse scanner only retrieve one set of rows
+        	if (scanner.isReversed()) {
+        		close(true);
+        		return null;
+        	}
+        	
           return scan();
         }
       } catch (final RuntimeException e) {

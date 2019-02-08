@@ -16,6 +16,8 @@ pom.xml
 */target/*
 *.orig
 *.log
+*.jar
+*.old
 
 #for Intellij
 \.idea
@@ -57,3 +59,7 @@ config.status.old
 opentsdb.conf
 opentsdb.spec
 src/net/
+src/query/expression/parser
+
+#Misc
+fetchdep.sh

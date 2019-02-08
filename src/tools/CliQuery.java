@@ -42,7 +42,7 @@ final class CliQuery {
     System.err.println("Usage: query"
         + " [Gnuplot opts] START-DATE [END-DATE] <query> [queries...]\n"
         + "A query has the form:\n"
-        + "  FUNC [rate] [counter,max,reset] [downsample N FUNC] SERIES [TAGS]\n"
+        + "  FUNC [usebackscanner] [rate] [counter,max,reset] [downsample N FUNC] SERIES [TAGS]\n"
         + "For example:\n"
         + " 2010/03/11-20:57 sum my.awsum.metric host=blah"
         + " sum some.other.metric host=blah state=foo\n"
@@ -198,6 +198,12 @@ final class CliQuery {
 
     while (i < args.length) {
       final Aggregator agg = Aggregators.get(args[i++]);
+      final boolean useBackScanner = args[i].equals("usebackscanner");
+      
+      if ( useBackScanner) {
+    	  i++;
+      }
+      
       final boolean rate = args[i].equals("rate");
       RateOptions rate_options = new RateOptions(false, Long.MAX_VALUE,
           RateOptions.DEFAULT_RESET_VALUE);
@@ -218,6 +224,7 @@ final class CliQuery {
           i++;
         }
       }
+      
       final boolean downsample = args[i].equals("downsample");
       if (downsample) {
         i++;
@@ -234,6 +241,8 @@ final class CliQuery {
         plotoptions.add(args[i++]);
       }
       final Query query = tsdb.newQuery();
+      query.setUseBackScanner(useBackScanner);
+      
       query.setStartTime(start_ts);
       if (end_ts > 0) {
         query.setEndTime(end_ts);
