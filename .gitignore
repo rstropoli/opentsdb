@@ -63,3 +63,12 @@ src/query/expression/parser
 
 #Misc
 fetchdep.sh
+.gwtc-stamp
+.javac-stamp
+.javac-unittests-stamp
+.staticroot-stamp
+gwt-unitCache/
+gwt/
+manifest
+staticroot/
+tsdb
