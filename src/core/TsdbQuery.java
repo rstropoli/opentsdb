@@ -118,6 +118,10 @@ final class TsdbQuery implements Query {
   
   /** Use reverse scan to retrieve extra data point before starttime, this is to ensure extra point is retrieved if outside of the interval */
   private boolean useBackScanner = false;
+  
+  /** Suppress exception for metric Id not found */
+  private boolean suppressMetricNotFoundException = false;
+  
   private byte[] start_key;
 
   /**
@@ -338,11 +342,19 @@ final class TsdbQuery implements Query {
     this.delete = delete;
   }
   
+  public void setSuppressMetricNotFoundException ( boolean suppressMetricNotFoundException ) {
+	  this.suppressMetricNotFoundException = suppressMetricNotFoundException;
+  }
+
+  public boolean getSuppressMetricNotFoundException () {
+	  return suppressMetricNotFoundException;
+  }
+  
   @Override
   public boolean getDelete() {
     return delete;
   }
-  
+
   @Override
   public void setPercentiles(List<Float> percentiles) {
     this.percentiles = percentiles;
@@ -456,6 +468,8 @@ final class TsdbQuery implements Query {
     }
     
     useBackScanner = query.getUseBackScanner ();
+    
+    suppressMetricNotFoundException = query.getSuppressMetricNotFoundException();
     
     final TSSubQuery sub_query = query.getQueries().get(index);
     setStartTime(query.startTime());
@@ -594,9 +608,24 @@ final class TsdbQuery implements Query {
         }
       }
       
+      
+      /** Error callback that will capture an exception from AsyncHBase and store
+       * it so we can bubble it up to the caller.
+       */
+      class ErrorCB implements Callback<Object, Exception> {
+        @Override
+        public Object call(final Exception e) throws Exception {
+       	  if ( suppressMetricNotFoundException && e instanceof NoSuchUniqueName ) {
+       	 	return Deferred.fromResult(null);
+       	  }
+
+          return Deferred.fromResult(e);
+        }
+      }
+      
       // fire off the callback chain by resolving the metric first
       return tsdb.metrics.getIdAsync(sub_query.getMetric())
-          .addCallbackDeferring(new MetricCB());
+          .addCallbackDeferring(new MetricCB()).addErrback(new ErrorCB());
     }
   }
   
@@ -835,7 +864,11 @@ final class TsdbQuery implements Query {
     if (Const.SALT_WIDTH() > 0) {
       final List<Scanner> scanners = new ArrayList<Scanner>(Const.SALT_BUCKETS());
       for (int i = 0; i < Const.SALT_BUCKETS(); i++) {
-        scanners.add(getScanner(i));
+      	Scanner scanner = getScanner(i);
+
+      	if ( scanner != null ) {
+      		scanners.add( scanner );
+      	}
       }
       scan_start_time = DateTime.nanoTime();
       return new SaltScanner(tsdb, metric, scanners, spans, scanner_filters,
@@ -844,7 +877,12 @@ final class TsdbQuery implements Query {
     } else {
       final List<Scanner> scanners = new ArrayList<Scanner>(1);
        
-      scanners.add(getScanner(0));
+      Scanner scanner = getScanner(0);
+      if ( scanner == null ) {
+      	return Deferred.fromResult(new TreeMap<byte[], Span>());
+      }
+      
+      scanners.add(scanner);
       scan_start_time = DateTime.nanoTime();
           
       if ( useBackScanner ) {
@@ -854,6 +892,7 @@ final class TsdbQuery implements Query {
       	// backScanner.setMaxNumRows(1);
       	// final List<Scanner> backScanners = new ArrayList<Scanner>(1);
       	
+    	
       	scanners.add(getReverseScanner() );
       	
       	start_key = Arrays.copyOf(scanners.get(0).getCurrentKey(), 
@@ -1465,6 +1504,10 @@ final class TsdbQuery implements Query {
       metric = UniqueId.stringToUid(metric_uid);
     }
     
+    if ( metric == null ) {
+    	return null;
+    }
+    
     final boolean is_rollup = RollupQuery.isValidQuery(rollup_query);
     
     // We search at least one row before and one row after the start & end
@@ -1613,6 +1656,10 @@ final class TsdbQuery implements Query {
       metric = UniqueId.stringToUid(metric_uid);
     }
     
+    if ( metric == null ) {
+    	return null;
+    }
+    
     // We search at least one row before and one row after the start & end
     // time we've been given as it's quite likely that the exact timestamp
     // we're looking for is in the middle of a row.  Plus, a number of things
@@ -1625,7 +1672,10 @@ final class TsdbQuery implements Query {
 		//		: (int) getScanEndTimeSeconds(),
         		tsdb.table, TSDB.FAMILY());
     
-    scanner.setReversed(true);
+    if ( scanner != null ) {
+    	scanner.setReversed(true);
+    }
+    
     if (tsuids != null && !tsuids.isEmpty()) {
       createAndSetTSUIDFilter(scanner);
     } else if (filters.size() > 0) {

@@ -568,7 +568,27 @@ final class QueryRpc implements HttpRpc {
     }
       
     if ( query.hasQueryStringParam("usebackscanner")) {
-    	data_query.setUseBackScanner(true);
+    	final String val = query.getQueryStringParam("usebackscanner").trim().toUpperCase();
+    	final boolean usebackscanner;
+        if (val.equals("TRUE")) {
+        	usebackscanner = true;
+          } else {
+        	  usebackscanner = false;
+          }
+        
+    	data_query.setUseBackScanner(usebackscanner);
+    }
+    
+    if ( query.hasQueryStringParam("suppress_metric_not_found_exception")) {
+    	final String val = query.getQueryStringParam("suppress_metric_not_found_exception").trim().toUpperCase();
+    	final boolean suppress_metric_not_found_exception;
+        if (val.equals("TRUE")) {
+        	suppress_metric_not_found_exception = true;
+          } else {
+        	  suppress_metric_not_found_exception = false;
+          }
+    	
+    	data_query.setSuppressMetricNotFoundException(suppress_metric_not_found_exception);
     }
     
     if (query.hasQueryStringParam("use_calendar")) {

@@ -98,10 +98,18 @@ public final class Internal {
         Const.SALT_WIDTH() > 0 ? Const.SALT_BUCKETS() : 1);
     if (Const.SALT_WIDTH() > 0) {
       for (int i = 0; i < Const.SALT_BUCKETS(); i++) {
-        scanners.add(((TsdbQuery) query).getScanner(i));
+    	Scanner scanner = ((TsdbQuery) query).getScanner(i);
+    	
+    	if ( scanner != null ) {
+    		scanners.add(scanner);
+    	}
       }
     } else {
-      scanners.add(((TsdbQuery) query).getScanner());
+      Scanner scanner = ((TsdbQuery) query).getScanner();
+      
+      if ( scanner != null ) {
+    	  scanners.add(scanner );
+      }
     }
     return scanners;
   }

@@ -108,7 +108,9 @@ public final class TSQuery {
   /** Override default max row count limit */
   private boolean override_data_point_limit;
 
-  private boolean use_backscanner;
+  private boolean use_backscanner=false;
+  
+  private boolean suppress_metric_not_found_exception=false;
   
   /**
    * Default constructor necessary for POJO de/serialization
@@ -154,7 +156,8 @@ public final class TSQuery {
         && Objects.equal(show_tsuids, query.show_tsuids)
         && Objects.equal(queries, query.queries)
         && Objects.equal(ms_resolution, query.ms_resolution) 
-        && Objects.equal(use_backscanner, query.use_backscanner);
+        && Objects.equal(use_backscanner, query.use_backscanner)
+        && Objects.equal(suppress_metric_not_found_exception, query.suppress_metric_not_found_exception);
   }
   
   /**
@@ -291,6 +294,8 @@ public final class TSQuery {
       .append(ms_resolution)
       .append(", user_backscanner=")
       .append(use_backscanner)
+      .append(", suppress_metric_not_found_exception=")
+      .append(suppress_metric_not_found_exception)
       .append(", options=[");
     if (options != null && !options.isEmpty()) {
       int counter = 0;
@@ -375,6 +380,10 @@ public final class TSQuery {
   
   public boolean getUseBackScanner () {
 	  return use_backscanner;
+  }
+  
+  public boolean getSuppressMetricNotFoundException () {
+	  return suppress_metric_not_found_exception;
   }
   
   /** @return whether or not to show the query with the results */
@@ -471,6 +480,10 @@ public final class TSQuery {
 
   public void setUseBackScanner ( boolean use_backscanner ) {
 	  this.use_backscanner = use_backscanner;
+  }
+  
+  public void setSuppressMetricNotFoundException (boolean suppress_metric_not_found_exception ) {
+	  this.suppress_metric_not_found_exception = suppress_metric_not_found_exception;
   }
   
   /** @param show_query whether or not to show the query with the serialization */
