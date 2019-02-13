@@ -171,6 +171,16 @@ public final class DownsamplingSpecification {
 	    	
 	    	if ( matcher.group("tolerance") != null ) {
 	    		alignment_interval = DateTime.parseDuration(matcher.group("tolerance"));
+	    		
+	    		if ( alignment_policy != AlignmentPolicy.NEAREST ) {
+	    			throw new IllegalArgumentException("invalid downsampling specification, tolerance cannot be used for this alignment policy" +
+	        		        parts[0]);	
+	    		}
+	    		
+	    		if ( alignment_interval > (interval/2) ) {
+	    			throw new IllegalArgumentException("invalid downsampling specification, tolerance should be less than interval/2" +
+	        		        parts[0]);
+	    		}
 	    	} else if (alignment_policy == AlignmentPolicy.NEAREST ) {
 	    		alignment_interval = interval/2;
 	    	} else {
