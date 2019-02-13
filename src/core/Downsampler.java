@@ -334,9 +334,9 @@ public class Downsampler implements SeekableView, DataPoint {
           moveToNextValue();
           if (!run_all) {
             if (specification.useCalendar()) {
-              previous_calendar = DateTime.previousInterval(next_dp.timestamp(), 
+              previous_calendar = DateTime.previousInterval(alignIntervalBoundary(next_dp.timestamp()), 
                   interval, unit, specification.getTimezone());
-              next_calendar = DateTime.previousInterval(next_dp.timestamp(), 
+              next_calendar = DateTime.previousInterval(alignIntervalBoundary(next_dp.timestamp()), 
                   interval, unit, specification.getTimezone());
               if (unit == WEEK_UNIT) {
                 next_calendar.add(DAY_UNIT, interval * WEEK_LENGTH);
@@ -345,7 +345,7 @@ public class Downsampler implements SeekableView, DataPoint {
               }
               timestamp_end_interval = next_calendar.getTimeInMillis();
             } else {
-              timestamp_end_interval = alignTimestamp(next_dp.timestamp()) + 
+              timestamp_end_interval = alignIntervalBoundary(next_dp.timestamp()) + 
                   specification.getInterval();
             }
           }
@@ -388,7 +388,7 @@ public class Downsampler implements SeekableView, DataPoint {
     private void resetEndOfInterval() {
       if (has_next_value_from_source && !run_all) {
         if (specification.useCalendar()) {
-          while (next_dp.timestamp() >= timestamp_end_interval) {
+          while ( alignIntervalBoundary(next_dp.timestamp()) >= timestamp_end_interval) {
             if (unit == WEEK_UNIT) {
               previous_calendar.add(DAY_UNIT, interval * WEEK_LENGTH);
               next_calendar.add(DAY_UNIT, interval * WEEK_LENGTH);
@@ -399,7 +399,7 @@ public class Downsampler implements SeekableView, DataPoint {
             timestamp_end_interval = next_calendar.getTimeInMillis();
           }
         } else {
-          timestamp_end_interval = alignTimestamp(next_dp.timestamp()) + 
+          timestamp_end_interval = alignIntervalBoundary(next_dp.timestamp()) + 
               specification.getInterval();
         }
       }
@@ -456,6 +456,29 @@ public class Downsampler implements SeekableView, DataPoint {
       return timestamp - (timestamp % specification.getInterval());
     }
     
+    protected long alignIntervalBoundary ( final long timestamp ) {
+      long distance = timestamp % specification.getInterval();
+      long floorTimestamp = timestamp - distance;
+      long ceilingTimestamp = floorTimestamp + 
+    		  ((distance!=0)?specification.getInterval():1);
+        
+  	  switch ( specification.getAlignmentPolicy()) {
+
+  		case CEILING:
+  			return ceilingTimestamp;
+  			
+  		case NEAREST:
+  			if ( (specification.getInterval() - distance) <  specification.getAlignmentInterval() ) {
+  				return ceilingTimestamp;
+  			} else {
+  				return floorTimestamp;
+  			}
+  			
+  	    default:
+  	    	return floorTimestamp;
+  	  }
+    }
+    
     // ---------------------- //
     // Doubles interface //
     // ---------------------- //
@@ -467,7 +490,7 @@ public class Downsampler implements SeekableView, DataPoint {
         return has_next_value_from_source;
       }
       return has_next_value_from_source &&
-          next_dp.timestamp() < timestamp_end_interval;
+    		  alignIntervalBoundary(next_dp.timestamp()) < timestamp_end_interval;
     }
 
     @Override

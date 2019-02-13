@@ -14,6 +14,8 @@ package net.opentsdb.core;
 
 import java.util.NoSuchElementException;
 import java.util.TimeZone;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.google.common.base.MoreObjects;
 import net.opentsdb.utils.DateTime;
@@ -53,6 +55,12 @@ public final class DownsamplingSpecification {
   // Whether or not to use the calendar for intervals
   private boolean use_calendar;
  
+  // alignment policy (floor, nearest or ceiling ) (defaults to floor)
+  private AlignmentPolicy alignment_policy;
+  
+  // distance from interval alignment boundary (in milliseconds)
+  private final long alignment_interval;
+  
   // The user provided timezone for calendar alignment (defaults to UTC)
   private TimeZone timezone;
 
@@ -69,6 +77,8 @@ public final class DownsamplingSpecification {
     use_calendar = false;
     timezone = DateTime.timezones.get(DateTime.UTC_ID);
     hist_agg = NO_HIST_AGG;
+    alignment_policy = AlignmentPolicy.FLOOR;
+    alignment_interval = 0;
   }
 
   /**
@@ -102,6 +112,8 @@ public final class DownsamplingSpecification {
     use_calendar = false;
     timezone = DateTime.timezones.get(DateTime.UTC_ID);
     hist_agg = NO_HIST_AGG;
+    alignment_policy = AlignmentPolicy.FLOOR;
+    alignment_interval = 0;
   }
 
   /**
@@ -135,21 +147,42 @@ public final class DownsamplingSpecification {
 
     // INTERVAL.
     // This will throw if interval is invalid.
+    
+    // Possible Intervals
+    // 1h , 1mc, 15mc, 1dc, 1dcn, 15mcwc, 15mcwn, 15mcwf  
+    // regex "(?<interval>\d+[smhdwny]s*)(?<calendar>c)*(?<alignment>w[ntb])*"
+    
     if (parts[0].contains("all")) {
       interval = NO_INTERVAL;
       use_calendar = false;
       string_interval = parts[0];
-    } else if (parts[0].charAt(parts[0].length() - 1) == 'c') {
-      final String duration = parts[0].substring(0, parts[0].length() - 1);
-      interval = DateTime.parseDuration(duration);
-      string_interval = duration;
-      use_calendar = true;
+      alignment_policy = AlignmentPolicy.FLOOR;
+      alignment_interval = 0;
     } else {
-      interval = DateTime.parseDuration(parts[0]);
-      use_calendar = false;
-      string_interval = parts[0];
-    }
-
+    	final String regex = "^(?<interval>\\d+[smhdwny]s?)(?<calendar>c)?(?<alignment>a[fnc])?(?<tolerance>\\d+(ms|s|m|h|d|w|n|y))?";
+    	Pattern pattern = Pattern.compile(regex);
+    	Matcher matcher = pattern.matcher(parts[0]);
+    	
+    	if ( matcher.matches() ) {
+	    	string_interval = matcher.group("interval");
+	    	interval = DateTime.parseDuration(string_interval);
+	    	use_calendar = (matcher.group("calendar") != null);
+	    	alignment_policy = AlignmentPolicy.fromCommandSpec(matcher.group("alignment"));
+	    	
+	    	if ( matcher.group("tolerance") != null ) {
+	    		alignment_interval = DateTime.parseDuration(matcher.group("tolerance"));
+	    	} else if (alignment_policy == AlignmentPolicy.NEAREST ) {
+	    		alignment_interval = interval/2;
+	    	} else {
+	    		alignment_interval = 0;
+	    	}
+	    	
+    	} else {
+    		throw new IllegalArgumentException("invalid downsampling specification: " +
+    		        parts[0]);
+    	}
+  	}
+  
     if (parts[1].toLowerCase().equals("sum")) {
       hist_agg = HistogramAggregation.SUM;
     } else {
@@ -246,6 +279,20 @@ public final class DownsamplingSpecification {
    * @since 2.3 */
   public TimeZone getTimezone() {
     return timezone;
+  }
+  
+  /**
+   * @return downsampling strategy ( FLOOR, CEILING or NEAREST)
+   */
+  public AlignmentPolicy getAlignmentPolicy () {
+	  return alignment_policy;
+  }
+  
+  /**
+   * @return the alignment interval used to calculate downsampled timestamp 
+   */
+  public long getAlignmentInterval () {
+	  return alignment_interval;
   }
   
   public HistogramAggregation getHistogramAggregation() {
